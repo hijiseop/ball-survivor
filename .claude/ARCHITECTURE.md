@@ -1,0 +1,4 @@
+- Interface-First (구현 전 규격 정의)
+- src/core/ → 인터페이스/타입
+- src/implementations/ → 서비스 로직
+- tests/ → 유닛/통합 테스트

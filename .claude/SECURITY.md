@@ -1,0 +1,4 @@
+- Raw Query 금지 → Prepared Statement/ORM 사용
+- 리소스 소유권(Owner ID) 검증 필수
+- 외부 입력 화이트리스트 기반 정화
+- API Key/비번 → .env 사용 (하드코딩 금지)

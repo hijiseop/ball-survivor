@@ -1,0 +1,7 @@
+.git/
+*.log *.tmp .DS_Store
+__pycache__/
+node_modules/
+dist/ build/ .next/
+*.lock *.min.js *.min.css
+coverage/ .env
