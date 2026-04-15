@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MapleStory 캐릭터 조회</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: Arial, sans-serif;
+            background: #f0f0f0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .card {
+            background: #fff;
+            border-radius: 12px;
+            padding: 36px;
+            width: 480px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+        h1 { font-size: 20px; margin-bottom: 24px; color: #333; }
+        label { font-size: 13px; color: #555; display: block; margin-bottom: 6px; }
+        input, select {
+            width: 100%;
+            padding: 10px 12px;
+            font-size: 15px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            margin-bottom: 14px;
+            outline: none;
+        }
+        input:focus, select:focus { border-color: #ff5722; }
+        button {
+            width: 100%;
+            padding: 11px;
+            font-size: 15px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            background: #ff5722;
+            color: #fff;
+            font-weight: bold;
+        }
+        button:hover { background: #e64a19; }
+        .secondary-btn {
+            background: #fff;
+            color: #ff5722;
+            border: 1px solid #ff5722;
+            margin-top: 8px;
+        }
+        .secondary-btn:hover { background: #fff3f0; }
+        .error { color: #e53935; font-size: 13px; margin-bottom: 10px; }
+        .result {
+            margin-top: 20px;
+            text-align: center;
+            padding: 20px;
+            border: 1px solid #eee;
+            border-radius: 8px;
+        }
+        .result img { width: 120px; height: 120px; object-fit: contain; }
+        .result h2 { margin: 10px 0 4px; font-size: 18px; }
+        .result p { color: #666; }
+        #loginSection, #searchSection { display: none; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <!-- 로그인 섹션 -->
+    <div id="loginSection">
+        <h1>🍁 MapleStory 캐릭터 조회</h1>
+        <label>Nexon Open API 키</label>
+        <input type="password" id="apiKeyInput" placeholder="live_xxxxxxxxxxxxxxxx">
+        <div id="loginError" class="error" style="display:none;"></div>
+        <button onclick="login()">로그인</button>
+    </div>
+
+    <!-- 검색 섹션 -->
+    <div id="searchSection">
+        <h1>🍁 내 캐릭터 조회</h1>
+        <label>캐릭터 선택</label>
+        <select id="characterSelect"></select>
+        <div id="searchError" class="error" style="display:none;"></div>
+        <button onclick="selectCharacter()">선택</button>
+        <button class="secondary-btn" onclick="logout()">로그아웃</button>
+        <div id="result" class="result" style="display:none;"></div>
+    </div>
+</div>
+
+<script>
+    // 초기 화면 결정 (세션은 서버가 관리하므로 간단히 로그인 화면부터)
+    document.getElementById('loginSection').style.display = 'block';
+
+    async function login() {
+        const apiKey = document.getElementById('apiKeyInput').value.trim();
+        const errorEl = document.getElementById('loginError');
+        errorEl.style.display = 'none';
+
+        if (!apiKey) { showError(errorEl, 'API 키를 입력해주세요.'); return; }
+
+        try {
+            const res = await fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ apiKey }),
+            });
+            const data = await res.json();
+
+            if (!res.ok) { showError(errorEl, data.error); return; }
+
+            // 캐릭터 목록 셀렉트 채우기
+            const select = document.getElementById('characterSelect');
+            select.innerHTML = '';
+            for (const char of data.characters) {
+                const opt = document.createElement('option');
+                opt.value = char.character_name;
+                opt.textContent = `${char.character_name} (Lv.${char.character_level})`;
+                select.appendChild(opt);
+            }
+
+            document.getElementById('loginSection').style.display = 'none';
+            document.getElementById('searchSection').style.display = 'block';
+        } catch {
+            showError(errorEl, '서버 연결 오류가 발생했습니다.');
+        }
+    }
+
+    async function selectCharacter() {
+        const name = document.getElementById('characterSelect').value;
+        const errorEl = document.getElementById('searchError');
+        errorEl.style.display = 'none';
+
+        try {
+            const res = await fetch('/api/select', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ character_name: name }),
+            });
+            const data = await res.json();
+            if (!res.ok) { showError(errorEl, data.error); return; }
+            window.location.href = '/game';
+        } catch {
+            showError(errorEl, '선택 중 오류가 발생했습니다.');
+        }
+    }
+
+    async function logout() {
+        await fetch('/api/logout', { method: 'POST' });
+        document.getElementById('searchSection').style.display = 'none';
+        document.getElementById('apiKeyInput').value = '';
+        document.getElementById('result').style.display = 'none';
+        document.getElementById('loginSection').style.display = 'block';
+    }
+
+    function showError(el, msg) {
+        el.textContent = msg;
+        el.style.display = 'block';
+    }
+
+    document.getElementById('apiKeyInput')?.addEventListener('keypress', e => {
+        if (e.key === 'Enter') login();
+    });
+</script>
+</body>
+</html>

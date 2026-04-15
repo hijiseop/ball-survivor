@@ -1,0 +1,75 @@
+const axios = require('axios');
+
+/**
+ * Nexon Open API 호출 공통 헬퍼
+ */
+function nexonGet(url, apiKey) {
+    return axios.get(url, { headers: { 'x-nxopen-api-key': apiKey } });
+}
+
+/**
+ * API 키로 계정의 캐릭터 목록 조회
+ * @returns {Promise<string[]>} 캐릭터명 배열
+ */
+async function getCharacterList(apiKey) {
+    const res = await nexonGet(
+        'https://open.api.nexon.com/maplestory/v1/character/list',
+        apiKey
+    );
+
+    // 응답: { account_list: [{ world_name, character_list: [{ character_name, ... }] }] }
+    const accountList = res.data?.account_list || [];
+    const characters = [];
+    for (const account of accountList) {
+        for (const char of account.character_list || []) {
+            if (char.character_name) {
+                characters.push({
+                    character_name: char.character_name,
+                    character_level: char.character_level || 0,
+                });
+            }
+        }
+    }
+    // 레벨 내림차순 정렬
+    characters.sort((a, b) => b.character_level - a.character_level);
+    return characters;
+}
+
+/**
+ * 캐릭터명으로 기본 정보 조회
+ * @returns {Promise<{character_name, character_level, character_image}>}
+ */
+async function getCharacterBasicData(characterName, apiKey) {
+    if (!characterName) throw new Error('Character name is required.');
+
+    try {
+        // 1. OCID 조회
+        const ocidRes = await nexonGet(
+            `https://open.api.nexon.com/maplestory/v1/id?character_name=${encodeURIComponent(characterName)}`,
+            apiKey
+        );
+        const ocid = ocidRes.data?.ocid;
+        if (!ocid) throw new Error('Character ID (OCID) not found.');
+
+        // 2. 기본 정보 조회
+        const basicRes = await nexonGet(
+            `https://open.api.nexon.com/maplestory/v1/character/basic?ocid=${ocid}`,
+            apiKey
+        );
+
+        return {
+            character_name: basicRes.data?.character_name || characterName,
+            character_level: basicRes.data?.character_level || 0,
+            character_image: basicRes.data?.character_image || '',
+        };
+
+    } catch (error) {
+        if (axios.isAxiosError(error)) {
+            if (error.response?.status === 404) throw new Error('캐릭터를 찾을 수 없습니다.');
+            if (error.response?.data?.message) throw new Error(error.response.data.message);
+        }
+        throw new Error('캐릭터 정보 조회에 실패했습니다.');
+    }
+}
+
+module.exports = { getCharacterList, getCharacterBasicData };
