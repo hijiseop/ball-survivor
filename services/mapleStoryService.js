@@ -51,16 +51,21 @@ async function getCharacterBasicData(characterName, apiKey) {
         const ocid = ocidRes.data?.ocid;
         if (!ocid) throw new Error('Character ID (OCID) not found.');
 
-        // 2. 기본 정보 조회
-        const basicRes = await nexonGet(
-            `https://open.api.nexon.com/maplestory/v1/character/basic?ocid=${ocid}`,
-            apiKey
-        );
+        // 2. 기본 정보 + 스텟 병렬 조회
+        const [basicRes, statRes] = await Promise.all([
+            nexonGet(`https://open.api.nexon.com/maplestory/v1/character/basic?ocid=${ocid}`, apiKey),
+            nexonGet(`https://open.api.nexon.com/maplestory/v1/character/stat?ocid=${ocid}`, apiKey),
+        ]);
+
+        const statList = statRes.data?.final_stat || statRes.data?.character_stat || [];
+        const rawPower = parseInt(statList.find(s => s.stat_name === '전투력')?.stat_value || '0', 10);
+        const combat_power = Math.max(1, Math.floor(rawPower / 10_000_000));
 
         return {
             character_name: basicRes.data?.character_name || characterName,
             character_level: basicRes.data?.character_level || 0,
             character_image: basicRes.data?.character_image || '',
+            combat_power,
         };
 
     } catch (error) {

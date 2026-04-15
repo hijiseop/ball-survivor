@@ -48,9 +48,9 @@ const INIT_BALLS      = 5;
 const SPEED_STEP      = 0.5;
 const DMG_FACTOR      = 1.5;
 const FRAME_MS        = 120;
-const CHAR_SPEED      = 1.0; // 캐릭터 이동 속도 (px/frame, 월드 기준)
-const TARGET_LERP     = 0.06; // 마우스 타겟 스무딩 (0~1, 낮을수록 둔감)
-const STOP_DIST       = 10;  // 이 거리 이내면 정지
+const CHAR_SPEED      = 300;  // 캐릭터 이동 속도 (px/초, 월드 기준)
+const TARGET_LERP_PS  = 8.0;  // 마우스 타겟 스무딩 (per second, 높을수록 빠름)
+const STOP_DIST       = 10;   // 이 거리 이내면 정지
 const ZOOM            = 1.3; // 카메라 줌 배율 (클수록 확대)
 
 const ACTION_STAND   = 'A00';
@@ -113,6 +113,7 @@ let attackUntil, lastAttackTime;
 let running = false;
 let bestTime = 0;
 let rafId;
+let lastLoopTime = 0;
 let facingRight = false;
 
 // ════════════════════════════════════════════════════
@@ -237,6 +238,7 @@ function startGame() {
     worldMx = WORLD_W / 2; worldMy = WORLD_H / 2;
     screenMx = VIEW_W / 2; screenMy = VIEW_H / 2;
     smoothTargetX = worldMx; smoothTargetY = worldMy;
+    lastLoopTime = Date.now();
     updateCamera(worldMx, worldMy);
 
     for (let i = 0; i < INIT_BALLS; i++) balls.push(mkBall());
@@ -295,20 +297,24 @@ function getCurrentFrame(now) {
 function loop() {
     if (!running) return;
     const now = Date.now(), elapsed = now - startTime;
+    const dt = Math.min((now - lastLoopTime) / 1000, 0.1); // 초 단위, 최대 0.1s
+    lastLoopTime = now;
 
-    // 마우스의 월드 좌표 (줌 적용) → 스무딩
+    // 마우스의 월드 좌표 (줌 적용) → 스무딩 (델타타임 기반)
     const rawX = screenMx / ZOOM + camX;
     const rawY = screenMy / ZOOM + camY;
-    smoothTargetX += (rawX - smoothTargetX) * TARGET_LERP;
-    smoothTargetY += (rawY - smoothTargetY) * TARGET_LERP;
+    const lerpT = 1 - Math.pow(1 - Math.min(TARGET_LERP_PS * dt, 1), 1);
+    smoothTargetX += (rawX - smoothTargetX) * lerpT;
+    smoothTargetY += (rawY - smoothTargetY) * lerpT;
     const targetX = smoothTargetX, targetY = smoothTargetY;
 
-    // 캐릭터 → 마우스 방향으로 서서히 이동
+    // 캐릭터 → 마우스 방향으로 서서히 이동 (델타타임 기반)
     const mdx = targetX - worldMx, mdy = targetY - worldMy;
     const mdist = Math.sqrt(mdx * mdx + mdy * mdy);
     if (mdist > STOP_DIST) {
-        worldMx += (mdx / mdist) * CHAR_SPEED;
-        worldMy += (mdy / mdist) * CHAR_SPEED;
+        const step = CHAR_SPEED * dt;
+        worldMx += (mdx / mdist) * Math.min(step, mdist);
+        worldMy += (mdy / mdist) * Math.min(step, mdist);
         walkUntil = now + 200;
         if (Math.abs(mdx) > 5) facingRight = mdx > 0;
     }
@@ -412,6 +418,21 @@ function render(now, elapsed) {
             ctx.drawImage(frame, charOffsetX, charOffsetY, charImgW, charImgH);
             ctx.restore();
         }
+
+        // 캐릭터 머리 위 HP바
+        const hpBarW = hitW;
+        const hpBarH = 5;
+        const hpBarX = worldMx - hpBarW / 2;
+        const hpBarY = worldMy + hitOffsetY - hitH / 2 - hpBarH - 3;
+        const hpRatio = hp / maxHp;
+        const hpColor = hpRatio > 0.5 ? 'rgba(76,175,80,0.6)' : hpRatio > 0.25 ? 'rgba(255,152,0,0.6)' : 'rgba(244,67,54,0.6)';
+
+        ctx.fillStyle = 'rgba(0,0,0,0.2)';
+        ctx.fillRect(hpBarX - 1, hpBarY - 1, hpBarW + 2, hpBarH + 2);
+        ctx.fillStyle = 'rgba(0,0,0,0.25)';
+        ctx.fillRect(hpBarX, hpBarY, hpBarW, hpBarH);
+        ctx.fillStyle = hpColor;
+        ctx.fillRect(hpBarX, hpBarY, hpBarW * hpRatio, hpBarH);
     }
 
     ctx.restore();
@@ -449,15 +470,22 @@ function drawHUD(now, elapsed) {
 
     // 우측 정보
     ctx.textAlign = 'right';
-    ctx.fillStyle = 'rgba(0,0,0,0.45)';
-    ctx.fillRect(VIEW_W - 130, 12, 118, 72);
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(VIEW_W - 140, 12, 128, 100);
     ctx.fillStyle = '#ff7043'; ctx.font = 'bold 13px Arial';
-    ctx.fillText(`데미지  ${curDmg}`, VIEW_W - 16, 32);
+    ctx.fillText(`받는 피해  ${curDmg}`, VIEW_W - 16, 32);
     ctx.fillStyle = '#90caf9';
     ctx.fillText(`공  ${balls.length}개`, VIEW_W - 16, 52);
+    ctx.fillStyle = '#ffd54f';
+    ctx.fillText(`전투력  ${character.combat_power}`, VIEW_W - 16, 72);
+
+    // 공격 쿨다운
     const cd = Math.min(1, (Date.now() - lastAttackTime) / ATTACK_INTERVAL);
-    ctx.fillStyle = cd >= 1 ? '#ffd54f' : '#777'; ctx.font = '12px Arial';
-    ctx.fillText(cd >= 1 ? '⚔ 공격 준비' : `⚔ ${((1 - cd) * 5).toFixed(1)}s`, VIEW_W - 16, 72);
+    const cdReady = cd >= 1;
+    const blink = cdReady && Math.floor(now / 400) % 2 === 0;
+    ctx.fillStyle = blink ? '#fff' : cdReady ? '#ffd54f' : '#e0e0e0';
+    ctx.font = `bold 14px Arial`;
+    ctx.fillText(cdReady ? '⚔ 공격 준비!' : `⚔ ${((1 - cd) * 5).toFixed(1)}s`, VIEW_W - 16, 92);
 
     ctx.textAlign = 'left';
 }
