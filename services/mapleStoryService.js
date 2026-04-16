@@ -1,4 +1,4 @@
-const axios = require('axios');
+import axios from 'axios';
 
 /**
  * Nexon Open API 호출 공통 헬퍼
@@ -11,7 +11,7 @@ function nexonGet(url, apiKey) {
  * API 키로 계정의 캐릭터 목록 조회
  * @returns {Promise<string[]>} 캐릭터명 배열
  */
-async function getCharacterList(apiKey) {
+export async function getCharacterList(apiKey) {
     const res = await nexonGet(
         'https://open.api.nexon.com/maplestory/v1/character/list',
         apiKey
@@ -37,9 +37,9 @@ async function getCharacterList(apiKey) {
 
 /**
  * 캐릭터명으로 기본 정보 조회
- * @returns {Promise<{character_name, character_level, character_image}>}
+ * @returns {Promise<{character_name, character_level, character_image, combat_power}>}
  */
-async function getCharacterBasicData(characterName, apiKey) {
+export async function getCharacterBasicData(characterName, apiKey) {
     if (!characterName) throw new Error('Character name is required.');
 
     try {
@@ -76,5 +76,3 @@ async function getCharacterBasicData(characterName, apiKey) {
         throw new Error('캐릭터 정보 조회에 실패했습니다.');
     }
 }
-
-module.exports = { getCharacterList, getCharacterBasicData };

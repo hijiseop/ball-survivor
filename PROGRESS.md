@@ -5,9 +5,56 @@
 - [x] API 키 로그인 / 내 캐릭터만 검색
 - [x] Ball Survivor 게임 구현
 - [x] 캐릭터 애니메이션 (stand / walk / attack)
-- [ ] 멀티플레이 (Socket.io)
+- [x] PvP 서버 아키텍처 설계 (SPEC.md)
+- [x] 공유 로직 모듈 (shared/)
+- [x] 멀티플레이 서버 구현 (Socket.io)
+- [x] 멀티플레이 클라이언트 구현 (client/)
+- [x] game.html PvP 전환
 
 ## ✅ 완료 항목
+
+### PvP 클라이언트 (client/ + templates/game.html)
+- **client/network.js** : Socket.io 클라이언트 래퍼
+  - `connect()` — `io()` 연결 + welcome/state/hit/kill/playerJoin/playerLeave/disconnect 핸들러
+  - `join()` — 게임 입장 (서버가 세션에서 캐릭터 정보 읽음)
+  - `sendInput(x, y)` — 마우스 타겟 월드 좌표 전송 (connected 체크)
+  - `on(event, fn)` — 이벤트 핸들러 등록
+- **client/input.js** : 마우스 입력 처리
+  - `init(canvas)` — mousemove 리스너 등록, 초기 위치 = 캔버스 중앙
+  - `getWorldTarget(camX, camY, zoom)` — 스크린 좌표 → 월드 좌표 변환
+- **client/renderer.js** : Canvas 렌더링 (멀티플레이어 확장)
+  - 이미지 캐시 : `characterImageUrl` 기반, 신규 플레이어 등장 시 비동기 프리로드
+  - 보간 : 이전 state ↔ 현재 state 선형 보간 (t = elapsed / SERVER_TICK_MS)
+  - 애니메이션 상태 : 플레이어별 Map 관리 (stand/walk/attack), 위치 변화로 walkUntil 갱신
+  - 피격 깜빡임 : `notifyHit(id)` → `INVINCIBLE_MS` 동안 100ms 주기 깜빡임
+  - 카메라 : 내 캐릭터 추적, 기존 ZOOM 로직 동일
+  - HUD : 내 HP바 + 킬수 + 생존자 수 (상단 중앙)
+  - 미니맵 : 전체 플레이어 표시 (내 캐릭터 = 파란 점, 타인 = 빨간 점, 사망자 = 회색)
+- **client/game.js** : 클라이언트 메인 (조립 + 초기화)
+  - `/api/me` → `Renderer.init()` → `Input.init()` → `Network.connect()` 순서 초기화
+  - `welcome` 수신 시 `join` 전송 + 렌더 루프 시작
+  - 입력 전송: `setInterval(SERVER_TICK_MS)` — 20Hz 서버 틱과 동기화
+- **templates/game.html** : PvP 전환 완료
+  - 인라인 `<script>` 전체 제거 → `socket.io.js` + `<script type="module" src="/client/game.js">`
+  - `#backBtn`, `#loading`, `#gameCanvas` 요소 유지
+
+### PvP 서버 (server/ + shared/)
+- **SPEC.md** : PvP 배틀로얄 전체 설계 (아키텍처, 이벤트 프로토콜, 파일 구조)
+- **shared/constants.js** : 서버·클라 공유 상수 (월드, 틱, 전투, 히트박스, 스프라이트)
+- **shared/game-logic.js** : 서버 권위적 게임 로직
+  - `updatePosition(player, dt)` — 델타타임 이동 + 맵 경계 클램프
+  - `checkAttackHit(attacker, target)` — 히트박스 중심 거리 판정
+  - `applyDamage(target, damage, now)` — 무적 시간 체크 후 HP 차감
+- **server/player.js** : Player 클래스 (랜덤 스폰, 상태 스냅샷, 공격/무적 타이머)
+- **server/game-room.js** : 20Hz 틱 루프
+  - 매 틱: 이동 → 자동공격 판정 → hit/kill 브로드캐스트 → state 브로드캐스트
+  - join/leave 이벤트 처리
+- **server/index.js** : Express + Socket.io 진입점 (기존 server.js 대체)
+  - 기존 Auth API 전체 유지 (`/api/login`, `/api/select`, `/api/me`, `/api/logout`)
+  - `/shared`, `/client`, `/public` 정적 서빙
+  - Socket.io 이벤트: `join`, `input`, `disconnect`
+- **services/mapleStoryService.js** : CommonJS → ESM 마이그레이션
+- **package.json** : `type: "module"` 전환, `socket.io ^4.7.0` 추가
 
 ### 백엔드 (server.js / mapleStoryService.js)
 - Nexon Open API 연동 (`x-nxopen-api-key` 헤더 방식)
@@ -45,6 +92,19 @@
 - 생존 시간 / 최고 기록 표시, 클릭으로 재시작
 
 ## 📝 로그
+- 2026-04-16 : 보안 리뷰 + 코드 정리
+  - server/index.js: Socket.io 세션 공유, join 시 서버 세션 검증 (스탯 조작 방지)
+  - server/index.js: input 좌표 NaN/Infinity 검증
+  - server/game-room.js: 사망 시 `target.alive = false` 누락 버그 수정
+  - client/renderer.js: 미사용 import 제거, ACTION_ATTACKS 상수 활용
+  - client/network.js, game.js: join 페이로드 제거 (서버 세션 사용)
+  - public/battlemap.png 이동 완료
+- 2026-04-16 : PvP 클라이언트 구현 완료 (network.js, input.js, renderer.js, game.js, game.html PvP 전환)
+- 2026-04-16 : PvP SPEC.md 설계 완료 (아키텍처, 이벤트 프로토콜, 파일 구조)
+- 2026-04-16 : shared/ 구현 (constants.js, game-logic.js)
+- 2026-04-16 : server/ 구현 완료 (player.js, game-room.js, index.js)
+- 2026-04-16 : ESM 마이그레이션 (package.json, mapleStoryService.js)
+- 2026-04-16 : socket.io 설치 및 서버 기동 확인
 - 2026-04-08 : 프로젝트 초기화
 - 2026-04-15 : Nexon API 연동, 로그인/캐릭터 선택 구현
 - 2026-04-15 : Ball Survivor 게임 완성 (애니메이션, 히트박스, 공격 모션)
@@ -58,4 +118,9 @@
 - 2026-04-15 : 캐릭터 머리 위 반투명 HP바 추가
 
 ## 🔜 다음 목표
-- Socket.io 멀티플레이 (배틀로얄 방식)
+- 구버전 `server.js` 삭제
+- `npm install` 후 `node server/index.js` 기동 테스트
+- 멀티탭 통합 테스트 (브라우저 2개 이상으로 실제 PvP 검증)
+- 리스폰 (사망 후 3초 뒤 랜덤 위치)
+- 킬로그 피드 (화면 좌측 하단 스크롤)
+- 킬 수 기준 실시간 리더보드

@@ -1,10 +1,11 @@
 {
-  "name": "ball-survivor",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "name": "ball-survivor-pvp",
+  "version": "2.0.0",
+  "description": "Ball Survivor PvP — 메이플스토리 캐릭터 실시간 배틀로얄",
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js"
   },
   "repository": {
     "type": "git",
@@ -13,7 +14,6 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
   "bugs": {
     "url": "https://github.com/hijiseop/ball-survivor/issues"
   },
@@ -22,6 +22,7 @@
     "axios": "^1.15.0",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "express-session": "^1.19.0"
+    "express-session": "^1.19.0",
+    "socket.io": "^4.7.0"
   }
 }
