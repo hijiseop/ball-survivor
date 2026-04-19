@@ -58,14 +58,25 @@ export async function getCharacterBasicData(characterName, apiKey) {
         ]);
 
         const statList = statRes.data?.final_stat || statRes.data?.character_stat || [];
-        const rawPower = parseInt(statList.find(s => s.stat_name === '전투력')?.stat_value || '0', 10);
-        const combat_power = Math.max(1, Math.floor(rawPower / 10_000_000));
+
+        const parseStat = (name) => {
+            const val = statList.find(s => s.stat_name === name)?.stat_value || '0';
+            return parseFloat(val.replace(/,/g, '')) || 0;
+        };
+
+        const rawPower  = parseStat('전투력');
+        const boss_dmg  = parseStat('보스 몬스터 데미지');  // %
+        const crit_dmg  = parseStat('크리티컬 데미지');     // %
+        const combat_power = Math.max(1, Math.floor(rawPower / 10_000_000)); // PvP 데미지 계산용
 
         return {
             character_name: basicRes.data?.character_name || characterName,
             character_level: basicRes.data?.character_level || 0,
             character_image: basicRes.data?.character_image || '',
             combat_power,
+            combat_power_raw: rawPower,
+            boss_dmg,
+            crit_dmg,
         };
 
     } catch (error) {

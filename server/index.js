@@ -8,6 +8,7 @@ import 'dotenv/config';
 
 import { getCharacterList, getCharacterBasicData } from '../services/mapleStoryService.js';
 import { GameRoom } from './game-room.js';
+import { WORLD_W, WORLD_H, SERVER_TICK_RATE } from '../shared/constants.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -107,6 +108,14 @@ room.start();
 io.on('connection', (socket) => {
     console.log(`socket connect: ${socket.id}`);
 
+    // 연결 즉시 welcome 전송 → 클라이언트가 join 보낼 수 있게 함
+    socket.emit('welcome', {
+        id: socket.id,
+        worldW: WORLD_W,
+        worldH: WORLD_H,
+        tickRate: SERVER_TICK_RATE,
+    });
+
     socket.on('join', () => {
         // 클라이언트 제공 데이터 무시 — 서버 세션에서 직접 읽어 스탯 조작 방지
         const charData = socket.request.session?.selectedCharacter;
@@ -116,6 +125,9 @@ io.on('connection', (socket) => {
             characterName:     charData.character_name,
             characterLevel:    charData.character_level,
             combatPower:       charData.combat_power,
+            combatPowerRaw:    charData.combat_power_raw ?? 0,
+            bossDmg:           charData.boss_dmg ?? 0,
+            critDmg:           charData.crit_dmg ?? 0,
             characterImageUrl: charData.character_image,
         });
     });

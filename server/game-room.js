@@ -2,7 +2,6 @@ import { updatePosition, checkAttackHit, applyDamage } from '../shared/game-logi
 import {
     SERVER_TICK_MS, SERVER_TICK_RATE,
     ATTACK_INTERVAL, ATTACK_DURATION,
-    WORLD_W, WORLD_H,
 } from '../shared/constants.js';
 import { Player } from './player.js';
 
@@ -24,23 +23,18 @@ export class GameRoom {
     }
 
     // 새 플레이어 입장
-    join(socket, { characterName, characterLevel, combatPower, characterImageUrl }) {
+    join(socket, { characterName, characterLevel, combatPower, combatPowerRaw, bossDmg, critDmg, characterImageUrl }) {
         const player = new Player(
             socket.id,
             characterName,
             characterLevel,
             combatPower,
-            characterImageUrl
+            characterImageUrl,
+            combatPowerRaw,
+            bossDmg,
+            critDmg
         );
         this.players.set(socket.id, player);
-
-        // 입장한 플레이어에게 초기 정보 전달
-        socket.emit('welcome', {
-            id: socket.id,
-            worldW: WORLD_W,
-            worldH: WORLD_H,
-            tickRate: SERVER_TICK_RATE,
-        });
 
         // 나머지 플레이어들에게 입장 알림
         socket.broadcast.emit('playerJoin', { id: socket.id, name: characterName });
@@ -88,7 +82,14 @@ export class GameRoom {
                     if (target.id === player.id || !target.alive) continue;
 
                     if (checkAttackHit(player, target)) {
-                        const result = applyDamage(target, player.damage, now);
+                        const diff = player.level - target.level;
+                        const modifier = diff >= 5
+                            ? 1.2
+                            : diff >= 0
+                            ? 1 + diff * 0.04
+                            : Math.max(0.6, 1 + diff * 0.01);
+                        const finalDamage = Math.max(1, Math.round(player.damage * modifier));
+                        const result = applyDamage(target, finalDamage, now);
                         if (result.applied) {
                             this.io.emit('hit', {
                                 attackerId: player.id,

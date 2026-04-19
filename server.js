@@ -1,7 +1,14 @@
-const express = require('express');
-const session = require('express-session');
-require('dotenv').config();
-const { getCharacterList, getCharacterBasicData } = require('./services/mapleStoryService');
+import express from 'express';
+import session from 'express-session';
+import dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+import { getCharacterList, getCharacterBasicData } from './services/mapleStoryService.js';
+
+dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const app = express();
 const port = process.env.PORT || 3000;

@@ -92,6 +92,23 @@
 - 생존 시간 / 최고 기록 표시, 클릭으로 재시작
 
 ## 📝 로그
+- 2026-04-19 : 이펙트 시스템 구현
+  - client/renderer.js: 공격 이펙트 — 펄스 글로우 + 링 확산 2개 + 파티클 12개
+  - client/renderer.js: 레벨 기반 안쪽 글로우 색 (보라~골드 10단계), 데미지 기반 바깥 링 색
+  - client/renderer.js: 피격 시 화면 빨간 플래시 + 카메라 쉐이크 (내가 맞을 때만)
+  - client/renderer.js: DEBUG_HITBOX / DEBUG_ATTACK_RANGE 플래그 정리
+- 2026-04-19 : 전투 시스템 개선
+  - server/index.js: 연결 즉시 welcome 전송 (데드락 수정)
+  - server/index.js: WORLD_W/H/SERVER_TICK_RATE import 추가
+  - services/mapleStoryService.js: parseInt 쉼표 파싱 버그 수정, boss_dmg/crit_dmg 추가
+  - server/player.js: level 별도 저장, combatPowerRaw(표시용), PvP 데미지 공식 (보공×크뎀 보정)
+  - server/game-room.js: 레벨 차이 기반 데미지 배율 (+5이상 120% / -40이하 60%)
+  - shared/game-logic.js: 공격 판정 → 공격 원 vs 히트박스 사각형 교차 (AABB+Circle)
+  - shared/constants.js: ATTACK_RANGE 60→28 (히트박스 모서리 기준), HIT_H 50→48
+  - client/renderer.js: 공격 쿨다운 HUD 복원 (우측 상단), 전투력/PvP데미지 HUD 추가
+  - client/renderer.js: 공격 애니메이션 A13/A14/A15 중 하나 랜덤 선택 (attackUntil 변경 시 교체)
+  - client/renderer.js: 이름/HP바 위치 이미지 높이 비율 기반으로 조정
+  - client/renderer.js: DEBUG_HITBOX / DEBUG_ATTACK_RANGE 디버그 플래그 추가
 - 2026-04-16 : 보안 리뷰 + 코드 정리
   - server/index.js: Socket.io 세션 공유, join 시 서버 세션 검증 (스탯 조작 방지)
   - server/index.js: input 좌표 NaN/Infinity 검증

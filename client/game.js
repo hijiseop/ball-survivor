@@ -47,7 +47,7 @@ async function init() {
     });
 
     Network.on('hit', ({ targetId }) => {
-        Renderer.notifyHit(targetId);
+        Renderer.notifyHit(targetId, myId);
     });
 
     Network.on('kill', () => {

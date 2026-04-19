@@ -1,6 +1,6 @@
 import {
     CHAR_SPEED, STOP_DIST, WORLD_W, WORLD_H,
-    HIT_OFFSET_X, HIT_OFFSET_Y,
+    HIT_W, HIT_H, HIT_OFFSET_X, HIT_OFFSET_Y,
     ATTACK_RANGE, INVINCIBLE_MS,
 } from './constants.js';
 
@@ -39,14 +39,21 @@ export function updatePosition(player, dt) {
  * @returns {boolean}
  */
 export function checkAttackHit(attacker, target) {
+    // 공격자 공격 원 중심
     const ax = attacker.x + HIT_OFFSET_X;
     const ay = attacker.y + HIT_OFFSET_Y;
+
+    // 타겟 히트박스 사각형
     const tx = target.x + HIT_OFFSET_X;
     const ty = target.y + HIT_OFFSET_Y;
 
-    const dx = ax - tx;
-    const dy = ay - ty;
-    return Math.sqrt(dx * dx + dy * dy) < ATTACK_RANGE;
+    // 원 중심에서 사각형 위의 가장 가까운 점 계산
+    const clampedX = Math.max(tx - HIT_W / 2, Math.min(ax, tx + HIT_W / 2));
+    const clampedY = Math.max(ty - HIT_H / 2, Math.min(ay, ty + HIT_H / 2));
+
+    const dx = ax - clampedX;
+    const dy = ay - clampedY;
+    return dx * dx + dy * dy < ATTACK_RANGE * ATTACK_RANGE;
 }
 
 /**

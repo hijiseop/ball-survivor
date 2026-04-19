@@ -13,14 +13,14 @@ export const STOP_DIST = 10;
 // 전투
 export const ATTACK_INTERVAL = 5000;       // 자동 공격 주기 (ms)
 export const ATTACK_DURATION = 360;        // 공격 모션 지속 (ms)
-export const ATTACK_RANGE = 60;            // 공격 히트 범위 (px, 캐릭터 중심 기준)
+export const ATTACK_RANGE = 33;            // 공격 히트 범위 (px, 히트박스 모서리 기준)
 export const INVINCIBLE_MS = 1500;         // 피격 후 무적 시간
 
 // 히트박스 (캐릭터 중심 기준 오프셋)
 export const HIT_W = 30;
-export const HIT_H = 50;
-export const HIT_OFFSET_X = -5;
-export const HIT_OFFSET_Y = 11;
+export const HIT_H = 48;
+export const HIT_OFFSET_X = -3;
+export const HIT_OFFSET_Y = 8;
 
 // 캐릭터 렌더 (클라이언트 전용이지만 공유해도 무방)
 export const CHAR_SCALE = 0.6;
