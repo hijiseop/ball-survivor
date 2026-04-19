@@ -1,5 +1,8 @@
 // client/renderer.js — Canvas 렌더링 (보간 + 카메라 + HUD + 미니맵)
 
+import * as KillFeed    from './hud-killfeed.js';
+import * as Leaderboard from './hud-leaderboard.js';
+
 import {
     WORLD_W, WORLD_H, ZOOM, CHAR_SCALE,
     HIT_W, HIT_H, HIT_OFFSET_X, HIT_OFFSET_Y,
@@ -7,8 +10,8 @@ import {
     INVINCIBLE_MS, ATTACK_INTERVAL, ATTACK_RANGE,
 } from '/shared/constants.js';
 
-const DEBUG_HITBOX = true;
-const DEBUG_ATTACK_RANGE = true;
+const DEBUG_HITBOX = false;
+const DEBUG_ATTACK_RANGE = false;
 
 // ── Canvas / Context ──────────────────────────────────────────
 let canvas, ctx;
@@ -340,7 +343,9 @@ export function render(prevPlayers, currPlayers, t, myId, now) {
     if (me) {
         drawHUD(me, currPlayers);
         drawMinimap(players, me);
+        Leaderboard.draw(ctx, currPlayers, myId, VIEW_W);
     }
+    KillFeed.draw(ctx, VIEW_W, VIEW_H);
 }
 
 // ─────────────────────────────────────────────────────────────

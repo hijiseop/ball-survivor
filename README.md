@@ -1,48 +1,59 @@
-# MapleStory API Backend
+# Ball Survivor PvP
 
-This repository provides a backend service to fetch character data from the Nexon MapleStory API, utilizing a clean, layered architecture to separate concerns.
+메이플스토리 캐릭터로 즐기는 실시간 배틀로얄.  
+Nexon Open API로 로그인 → 내 캐릭터 선택 → 서버 입장 → PvP.
 
-## 🚀 Architecture Overview
+## 실행
 
-The application follows a tiered architecture (Client -> Server -> Service Layer -> External API) for robust separation of concerns and maintainability.
+```bash
+npm install
+node server/index.js
+# http://localhost:3000
+```
 
-1.  **Client:** The frontend that consumes the public API endpoint (`/api/character`).
-2.  **Server (server.js):** Acts as the entry point and HTTP handler. Its sole responsibility is setting up Express, handling middleware, validating incoming requests, and routing calls to the Service Layer. It contains no direct API calling logic.
-3.  **Service Layer (services/mapleStoryService.js):** This dedicated module abstracts all external communication with Nexon APIs. It encapsulates API keys, endpoint URLs, HTTP client interactions (Axios), and complex error handling/mapping, shielding the rest of the application from external API details.
-4.  **External API:** The third-party MapleStory API provided by Nexon.
+## 환경변수
 
-## ⚙️ Module Responsibilities
+`.env.example` 복사 후 값 입력:
 
-*   **`server.js`**:
-    *   Express setup and initialization.
-    *   Defines HTTP routes (`/api/character`).
-    *   Handles request validation (e.g., checking for `character_name`).
-    *   Calls the `mapleStoryService` to perform business logic.
-    *   Manages HTTP response status codes and JSON structure.
+```
+SESSION_SECRET=your_secret_here
+```
 
-*   **`services/mapleStoryService.js`**:
-    *   Contains the core business logic for fetching character data (e.g., sequential calls to get OCID, then get basic info).
-    *   Handles all `axios` calls, including base URL construction, API key management, and request parameters.
-    *   Implements robust try/catch blocks to map external API errors into standardized, predictable service errors for the Server Layer.
+## 구조
 
-## 💡 How To Run The Project
+```
+server/
+  index.js              # Express + Socket.io 진입점
+  game-room.js          # 20Hz 게임 틱 루프
+  player.js             # Player 클래스
+  services/
+    mapleStoryService.js  # Nexon Open API 래퍼
 
-### Prerequisites
+shared/
+  constants.js          # 서버·클라 공유 상수
+  game-logic.js         # 이동·충돌·데미지 로직
 
-*   Node.js and npm installed.
-*   A `.env` file containing your Nexon API Key: `NEXON_API_KEY=YOUR_API_KEY`.
+client/
+  game.js               # 클라이언트 메인
+  renderer.js           # Canvas 렌더링
+  network.js            # Socket.io 래퍼
+  input.js              # 마우스 입력
+  hud-killfeed.js       # 킬로그 피드 HUD
+  hud-leaderboard.js    # 리더보드 HUD
 
-### Step-by-Step Instructions
+templates/
+  index.html            # 로그인·캐릭터 선택
+  game.html             # 게임
 
-1.  **Install Dependencies:**
-    ```bash
-    npm install
-    ```
-2.  **Start the Server:**
-    ```bash
-    node server.js
-    ```
-3.  **Test API Endpoint:**
-    The service is available at `http://localhost:3000/api/character?character_name=CharacterName`.
+public/
+  battlemap.png         # 배경 이미지
+```
 
-This refactoring ensures that if the Nexon API changes its structure or rate limits, only `services/mapleStoryService.js` needs to be updated, leaving `server.js` untouched.
+## Auth API
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| POST | `/api/login` | Nexon API 키 검증 + 캐릭터 목록 반환 |
+| POST | `/api/select` | 캐릭터 선택 → 세션 저장 |
+| GET  | `/api/me` | 현재 선택된 캐릭터 정보 |
+| POST | `/api/logout` | 세션 삭제 |

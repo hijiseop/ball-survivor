@@ -141,7 +141,9 @@ export class GameRoom {
                             player.kills++;
                             this.io.emit('kill', {
                                 killerId: player.id,
+                                killerName: player.name,
                                 victimId: target.id,
+                                victimName: target.name,
                             });
                         }
                     }

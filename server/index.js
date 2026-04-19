@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import 'dotenv/config';
 
-import { getCharacterList, getCharacterBasicData } from '../services/mapleStoryService.js';
+import { getCharacterList, getCharacterBasicData } from './services/mapleStoryService.js';
 import { GameRoom } from './game-room.js';
 import { WORLD_W, WORLD_H, SERVER_TICK_RATE } from '../shared/constants.js';
 

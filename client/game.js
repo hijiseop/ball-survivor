@@ -1,8 +1,9 @@
 // client/game.js — 클라이언트 메인 (조립 + 초기화)
 
-import * as Network  from './network.js';
-import * as Input    from './input.js';
-import * as Renderer from './renderer.js';
+import * as Network   from './network.js';
+import * as Input     from './input.js';
+import * as Renderer  from './renderer.js';
+import * as KillFeed  from './hud-killfeed.js';
 import { ZOOM, SERVER_TICK_MS } from '/shared/constants.js';
 
 // ── 상태 ──────────────────────────────────────────────────────
@@ -50,8 +51,8 @@ async function init() {
         Renderer.notifyHit(targetId, myId);
     });
 
-    Network.on('kill', () => {
-        // TODO: 킬 로그 표시
+    Network.on('kill', ({ killerName, victimName }) => {
+        KillFeed.addKill(killerName, victimName);
     });
 
     Network.on('roomFull', () => {

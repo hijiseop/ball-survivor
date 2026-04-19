@@ -12,6 +12,10 @@
 - [x] game.html PvP 전환
 - [x] 그리드 기반 공간 분할 최적화 (O(n²) → 근접 셀)
 - [x] 최대 인원 제한 (20명)
+- [x] 킬로그 피드 (좌측 하단, fade-out)
+- [x] 실시간 리더보드 (우측 상단, 킬 수 기준 top5)
+- [x] 파일 구조 정리 (services/ → server/services/, 구버전 server.js 삭제)
+- [x] 문서 동기화 (README, SPEC, PROGRESS 현행화)
 
 ## ✅ 완료 항목
 
@@ -94,6 +98,14 @@
 - 생존 시간 / 최고 기록 표시, 클릭으로 재시작
 
 ## 📝 로그
+- 2026-04-20 : 킬로그 피드 + 리더보드 + 파일 정리
+  - client/hud-killfeed.js: 킬로그 피드 모듈 (최신 5개, 3초 fade-out, 좌측 하단)
+  - client/hud-leaderboard.js: 리더보드 모듈 (킬 수 내림차순 top5, 우측 상단, 내 캐릭터 강조)
+  - server/game-room.js: kill 이벤트에 killerName, victimName 추가
+  - client/renderer.js: KillFeed.draw(), Leaderboard.draw() 조립, DEBUG 플래그 false
+  - client/game.js: kill 이벤트 수신 시 KillFeed.addKill() 호출
+  - services/ → server/services/ 이동, server.js·pvp-architecture-spec.md 삭제
+  - README.md 전면 재작성, SPEC.md §4/5/8/13/15 현행화
 - 2026-04-19 : 그리드 기반 공간 분할 최적화 + 최대 인원 제한
   - shared/constants.js: GRID_CELL_SIZE=100, MAX_PLAYERS=20 추가
   - server/game-room.js: _buildGrid() / _getNeighbors() 구현 — 공격 판정 O(n²) → 근접 3×3 셀만 체크
@@ -143,9 +155,7 @@
 - 2026-04-15 : 캐릭터 머리 위 반투명 HP바 추가
 
 ## 🔜 다음 목표
-- 구버전 `server.js` 삭제
-- `npm install` 후 `node server/index.js` 기동 테스트
 - 멀티탭 통합 테스트 (브라우저 2개 이상으로 실제 PvP 검증)
 - 리스폰 (사망 후 3초 뒤 랜덤 위치)
-- 킬로그 피드 (화면 좌측 하단 스크롤)
-- 킬 수 기준 실시간 리더보드
+- 축소 존 (배틀로얄 존)
+- HP 회복 아이템 드롭
