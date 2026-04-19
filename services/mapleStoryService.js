@@ -82,7 +82,7 @@ export async function getCharacterBasicData(characterName, apiKey) {
     } catch (error) {
         if (axios.isAxiosError(error)) {
             if (error.response?.status === 404) throw new Error('캐릭터를 찾을 수 없습니다.');
-            if (error.response?.data?.message) throw new Error(error.response.data.message);
+            if (error.response?.status === 429) throw new Error('잠시 후 다시 시도해주세요.');
         }
         throw new Error('캐릭터 정보 조회에 실패했습니다.');
     }

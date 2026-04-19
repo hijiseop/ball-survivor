@@ -23,11 +23,19 @@ const port = process.env.PORT || 3000;
 app.use(express.json());
 
 // 세션 미들웨어를 변수로 추출 → Socket.io와 공유
+if (!process.env.SESSION_SECRET) {
+    throw new Error('SESSION_SECRET 환경변수가 설정되지 않았습니다. .env 파일을 확인하세요.');
+}
 const sessionMiddleware = session({
-    secret: process.env.SESSION_SECRET || 'maple-secret-key',
+    secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
-    cookie: { maxAge: 1000 * 60 * 60 * 24 }, // 24시간
+    cookie: {
+        maxAge: 1000 * 60 * 60 * 24, // 24시간
+        httpOnly: true,
+        sameSite: 'strict',
+        secure: process.env.NODE_ENV === 'production',
+    },
 });
 app.use(sessionMiddleware);
 // Socket.io 연결에도 동일한 세션 적용 (join 이벤트에서 서버 세션으로 캐릭터 정보 검증)
