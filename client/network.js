@@ -9,7 +9,7 @@ const _handlers = {};
 export function connect() {
     _socket = io();
 
-    for (const evt of ['welcome', 'state', 'hit', 'kill', 'playerJoin', 'playerLeave', 'disconnect']) {
+    for (const evt of ['welcome', 'state', 'hit', 'kill', 'playerJoin', 'playerLeave', 'disconnect', 'roomFull']) {
         _socket.on(evt, data => _handlers[evt]?.(data));
     }
 }

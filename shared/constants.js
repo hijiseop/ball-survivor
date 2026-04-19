@@ -27,6 +27,10 @@ export const CHAR_SCALE = 0.6;
 export const ZOOM = 1.3;
 export const FRAME_MS = 120;
 
+// 공간 분할 그리드
+export const GRID_CELL_SIZE = 100;         // px, 공격 범위(~72px)보다 크게
+export const MAX_PLAYERS = 20;             // 방 최대 인원
+
 // 스프라이트 액션 코드
 export const ACTION_STAND = 'A00';
 export const ACTION_WALK = 'A02';

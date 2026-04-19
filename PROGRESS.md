@@ -10,6 +10,8 @@
 - [x] 멀티플레이 서버 구현 (Socket.io)
 - [x] 멀티플레이 클라이언트 구현 (client/)
 - [x] game.html PvP 전환
+- [x] 그리드 기반 공간 분할 최적화 (O(n²) → 근접 셀)
+- [x] 최대 인원 제한 (20명)
 
 ## ✅ 완료 항목
 
@@ -92,6 +94,12 @@
 - 생존 시간 / 최고 기록 표시, 클릭으로 재시작
 
 ## 📝 로그
+- 2026-04-19 : 그리드 기반 공간 분할 최적화 + 최대 인원 제한
+  - shared/constants.js: GRID_CELL_SIZE=100, MAX_PLAYERS=20 추가
+  - server/game-room.js: _buildGrid() / _getNeighbors() 구현 — 공격 판정 O(n²) → 근접 3×3 셀만 체크
+  - server/game-room.js: join() 시 20명 초과 시 roomFull 이벤트 후 강제 종료
+  - client/network.js: roomFull 이벤트 수신 등록
+  - client/game.js: roomFull 수신 시 알림 후 로비 이동
 - 2026-04-19 : 이펙트 시스템 구현
   - client/renderer.js: 공격 이펙트 — 펄스 글로우 + 링 확산 2개 + 파티클 12개
   - client/renderer.js: 레벨 기반 안쪽 글로우 색 (보라~골드 10단계), 데미지 기반 바깥 링 색

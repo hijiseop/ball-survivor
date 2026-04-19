@@ -54,6 +54,11 @@ async function init() {
         // TODO: 킬 로그 표시
     });
 
+    Network.on('roomFull', () => {
+        alert('방이 가득 찼습니다. (최대 20명)');
+        window.location.href = '/';
+    });
+
     Network.on('disconnect', () => {
         alert('서버 연결이 끊겼습니다.');
         window.location.href = '/';
