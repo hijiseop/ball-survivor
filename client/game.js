@@ -79,9 +79,9 @@ async function init() {
 // ── 렌더 루프 ─────────────────────────────────────────────────
 function renderLoop() {
     const now = Date.now();
-    // stateTime 기준으로 보간 계수 t 계산 (0 → 1+)
     const t = stateTime > 0 ? (now - stateTime) / SERVER_TICK_MS : 0;
 
+    Input.update();
     Renderer.render(prevPlayers, currPlayers, t, myId, now);
 
     requestAnimationFrame(renderLoop);

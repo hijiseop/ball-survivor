@@ -2,6 +2,7 @@
 
 import * as KillFeed    from './hud-killfeed.js';
 import * as Leaderboard from './hud-leaderboard.js';
+import * as Input        from './input.js';
 
 import {
     WORLD_W, WORLD_H, ZOOM, CHAR_SCALE,
@@ -24,6 +25,9 @@ let shakeStrength = 0;
 
 // ── 피격 플래시 ───────────────────────────────────────────────
 let hitFlashAt = 0;   // 내가 맞은 시간
+
+// ── 리더보드 토글 ─────────────────────────────────────────────
+let _showLeaderboard = true;
 
 // ── 배경 이미지 ───────────────────────────────────────────────
 const bgImg = new Image();
@@ -118,7 +122,27 @@ export async function init() {
     canvas.width  = VIEW_W;
     canvas.height = VIEW_H;
     canvas.style.display = 'block';
+    canvas.style.cursor = 'none';
     ctx = canvas.getContext('2d');
+
+    window.addEventListener('keydown', e => {
+        if (e.key === 'Tab') { e.preventDefault(); _showLeaderboard = !_showLeaderboard; }
+    });
+
+    // 🏆 버튼 탭/클릭 토글
+    function handleToggleTap(clientX, clientY) {
+        const r = canvas.getBoundingClientRect();
+        const x = clientX - r.left;
+        const y = clientY - r.top;
+        const bx = VIEW_W - 36, by = 4, bw = 32, bh = 26;
+        if (x >= bx && x <= bx + bw && y >= by && y <= by + bh) {
+            _showLeaderboard = !_showLeaderboard;
+        }
+    }
+    canvas.addEventListener('click', e => handleToggleTap(e.clientX, e.clientY));
+    canvas.addEventListener('touchend', e => {
+        if (e.changedTouches[0]) handleToggleTap(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
+    }, { passive: true });
 
     document.getElementById('loading').style.display = 'none';
 }
@@ -341,11 +365,47 @@ export function render(prevPlayers, currPlayers, t, myId, now) {
 
     // ── 스크린 공간 (HUD + 미니맵) ───────────────────────────
     if (me) {
-        drawHUD(me, currPlayers);
-        drawMinimap(players, me);
-        Leaderboard.draw(ctx, currPlayers, myId, VIEW_W);
+        const hudScale = Math.min(1, VIEW_W / 560);
+        drawHUD(me, currPlayers, hudScale);
+        drawMinimap(players, me, hudScale);
+        if (_showLeaderboard) Leaderboard.draw(ctx, currPlayers, myId, VIEW_W, hudScale);
     }
     KillFeed.draw(ctx, VIEW_W, VIEW_H);
+
+    const isMoving = (animState.get(myId)?.walkUntil ?? 0) > now;
+    if (me && isMoving) drawTargetCursor();
+}
+
+function drawTargetCursor() {
+    const { x, y, inDeadZone, dist, deadZoneR, isTouching } = Input.getScreenPos();
+    if (inDeadZone || isTouching) return;
+
+    const fadeStart = deadZoneR;
+    const fadeEnd   = deadZoneR * 4;
+    const t = Math.min(1, Math.max(0, (dist - fadeStart) / (fadeEnd - fadeStart)));
+    const alpha = 0.15 + t * 0.55; // 최소 0.15 ~ 최대 0.7
+
+    const color = '#ffffff';
+    const R = 10, GAP = 4, LINE = 6;
+
+    ctx.save();
+    ctx.shadowBlur = 0; // 잔상 방지
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+
+    ctx.beginPath();
+    ctx.arc(x, y, R, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(x, y - R - GAP);         ctx.lineTo(x, y - R - GAP - LINE);
+    ctx.moveTo(x, y + R + GAP);         ctx.lineTo(x, y + R + GAP + LINE);
+    ctx.moveTo(x - R - GAP, y);         ctx.lineTo(x - R - GAP - LINE, y);
+    ctx.moveTo(x + R + GAP, y);         ctx.lineTo(x + R + GAP + LINE, y);
+    ctx.stroke();
+
+    ctx.restore();
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -541,12 +601,16 @@ function drawHPBar(player, size, isMe) {
 // ─────────────────────────────────────────────────────────────
 // HUD
 // ─────────────────────────────────────────────────────────────
-function drawHUD(me, allPlayers) {
+function drawHUD(me, allPlayers, s) {
     const barW = 260, barH = 20;
     const ratio = Math.max(0, me.hp / me.maxHp);
     const hpColor = ratio > 0.5 ? '#4caf50' : ratio > 0.25 ? '#ff9800' : '#f44336';
+    const alive = allPlayers.filter(p => p.alive).length;
 
-    // 왼쪽 패널 (내 HP + 이름 + 전투력)
+    // ── 왼쪽 패널 (스케일 적용) ──
+    ctx.save();
+    ctx.scale(s, s);
+
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
     ctx.fillRect(12, 12, barW + 8, 82);
 
@@ -567,7 +631,6 @@ function drawHUD(me, allPlayers) {
     ctx.font = '12px Arial';
     ctx.fillText(me.name, 16, 52);
 
-    const alive = allPlayers.filter(p => p.alive).length;
     ctx.fillStyle = '#ffd54f';
     ctx.font = '11px Arial';
     ctx.fillText(`킬 ${me.kills ?? 0}  ·  생존 ${alive} / ${allPlayers.length}`, 16, 66);
@@ -576,39 +639,60 @@ function drawHUD(me, allPlayers) {
     ctx.font = '11px Arial';
     ctx.fillText(`전투력 ${(me.combatPower ?? 0).toLocaleString()}  ·  PvP 데미지 ${me.damage ?? 0}`, 16, 80);
 
-    // 공격 쿨다운
+    ctx.restore();
+
+    // ── 우측 상단 (생존 수 + 쿨다운, 스케일 적용) ──
     const now2 = Date.now();
     const cdReady = now2 >= (me.nextAttackAt ?? 0);
     const remaining = Math.max(0, ((me.nextAttackAt ?? 0) - now2) / 1000);
+
+    ctx.save();
+    ctx.scale(s, s);
+    ctx.textAlign = 'right';
+
+    const rightEdge = (VIEW_W - 44) / s; // 🏆 버튼(32px) + 여백 피하기
+
+    ctx.fillStyle = alive <= 1 ? '#ff5722' : '#e0e0e0';
+    ctx.font = 'bold 13px Arial';
+    ctx.fillText(`${alive} / ${allPlayers.length} 생존`, rightEdge, 18);
+
     if (!cdReady) {
-        ctx.fillStyle = '#e0e0e0';
-        ctx.font = 'bold 14px Arial';
-        ctx.textAlign = 'right';
-        ctx.fillText(`⚔ ${remaining.toFixed(1)}s`, VIEW_W - 16, 32);
-        ctx.textAlign = 'left';
+        ctx.fillStyle = '#ffd54f';
+        ctx.font = 'bold 13px Arial';
+        ctx.fillText(`⚔ ${remaining.toFixed(1)}s`, rightEdge, 36);
     }
 
-    // 상단 중앙 (생존자 수)
-    ctx.fillStyle = 'rgba(0,0,0,0.5)';
-    ctx.fillRect(VIEW_W / 2 - 90, 8, 180, 32);
-    ctx.fillStyle = alive <= 1 ? '#ff5722' : '#fff';
-    ctx.font = 'bold 17px Arial';
+    ctx.restore();
+
+    // 🏆 토글 버튼 (스케일 미적용 — 항상 고정 크기)
+    ctx.save();
+    ctx.globalAlpha = _showLeaderboard ? 0.9 : 0.35;
+    ctx.fillStyle = 'rgba(10,10,20,0.7)';
+    ctx.beginPath();
+    ctx.roundRect(VIEW_W - 36, 4, 32, 26, 5);
+    ctx.fill();
+    ctx.font = '15px Arial';
     ctx.textAlign = 'center';
-    ctx.fillText(`${alive} / ${allPlayers.length} 생존`, VIEW_W / 2, 29);
-    ctx.textAlign = 'left';
+    ctx.fillStyle = '#ffd54f';
+    ctx.fillText('🏆', VIEW_W - 20, 22);
+    ctx.restore();
 }
 
 // ─────────────────────────────────────────────────────────────
 // 미니맵
 // ─────────────────────────────────────────────────────────────
-function drawMinimap(players, me) {
+function drawMinimap(players, me, s) {
     const MM_H   = Math.round(MM_W * WORLD_H / WORLD_W);
-    const MX     = VIEW_W  - MM_W - MM_PAD;
-    const MY     = VIEW_H  - MM_H - MM_PAD;
     const scaleX = MM_W / WORLD_W;
     const scaleY = MM_H / WORLD_H;
 
-    // 배경
+    ctx.save();
+    ctx.translate(VIEW_W, VIEW_H);
+    ctx.scale(s, s);
+    ctx.translate(-(MM_W + MM_PAD), -(MM_H + MM_PAD));
+
+    const MX = 0, MY = 0;
+
     ctx.fillStyle = 'rgba(0,0,0,0.65)';
     ctx.fillRect(MX - 1, MY - 1, MM_W + 2, MM_H + 2);
     if (bgImg.complete && bgImg.naturalWidth) {
@@ -617,7 +701,6 @@ function drawMinimap(players, me) {
         ctx.globalAlpha = 1;
     }
 
-    // 현재 뷰포트 영역
     ctx.strokeStyle = 'rgba(255,255,255,0.55)';
     ctx.lineWidth = 1;
     ctx.strokeRect(
@@ -627,7 +710,6 @@ function drawMinimap(players, me) {
         (VIEW_H / ZOOM) * scaleY,
     );
 
-    // 플레이어 점
     for (const p of players) {
         const isMe = p.id === me.id;
         ctx.beginPath();
@@ -643,8 +725,9 @@ function drawMinimap(players, me) {
         ctx.fill();
     }
 
-    // 테두리
     ctx.strokeStyle = '#555';
     ctx.lineWidth = 1;
     ctx.strokeRect(MX, MY, MM_W, MM_H);
+
+    ctx.restore();
 }

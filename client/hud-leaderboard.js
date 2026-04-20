@@ -13,15 +13,20 @@ const MARGIN_Y = 48;  // 공격 쿨다운 텍스트(y≈32) 아래
  * @param {string} myId    — 내 플레이어 id
  * @param {number} canvasW — canvas.width
  */
-export function draw(ctx, players, myId, canvasW) {
+export function draw(ctx, players, myId, canvasW, s = 1) {
     const top5 = [...players]
         .sort((a, b) => (b.kills ?? 0) - (a.kills ?? 0))
         .slice(0, 5);
 
     const rows  = top5.length;
     const panelH = PAD_Y * 2 + ROW_H * rows + 4;
-    const x = canvasW - PANEL_W - MARGIN_X;
-    const y = MARGIN_Y;
+
+    ctx.save();
+    ctx.translate(canvasW, 0);
+    ctx.scale(s, s);
+    ctx.translate(-(PANEL_W + MARGIN_X), MARGIN_Y);
+
+    const x = 0, y = 0;
 
     // 배경 패널
     ctx.save();
@@ -73,7 +78,8 @@ export function draw(ctx, players, myId, canvasW) {
         ctx.fillText(`${p.kills ?? 0}K`, x + PANEL_W - PAD_X, rowY + 13);
     });
 
-    ctx.restore();
+    ctx.restore(); // inner
+    ctx.restore(); // outer (translate + scale)
 }
 
 // ── helpers ──────────────────────────────────────────────────────

@@ -25,9 +25,11 @@
   - `join()` — 게임 입장 (서버가 세션에서 캐릭터 정보 읽음)
   - `sendInput(x, y)` — 마우스 타겟 월드 좌표 전송 (connected 체크)
   - `on(event, fn)` — 이벤트 핸들러 등록
-- **client/input.js** : 마우스 입력 처리
-  - `init(canvas)` — mousemove 리스너 등록, 초기 위치 = 캔버스 중앙
+- **client/input.js** : 마우스/터치 입력 처리
+  - `init(canvas)` — mousemove + touchstart/move/end 리스너 등록
+  - 마우스 데드존 (중앙 40px): 정지 판정, 터치는 손 떼면 자동 정지
   - `getWorldTarget(camX, camY, zoom)` — 스크린 좌표 → 월드 좌표 변환
+  - `getScreenPos()` — 스크린 좌표 + 데드존 여부 + 거리 반환 (커서 렌더용)
 - **client/renderer.js** : Canvas 렌더링 (멀티플레이어 확장)
   - 이미지 캐시 : `characterImageUrl` 기반, 신규 플레이어 등장 시 비동기 프리로드
   - 보간 : 이전 state ↔ 현재 state 선형 보간 (t = elapsed / SERVER_TICK_MS)
@@ -98,6 +100,13 @@
 - 생존 시간 / 최고 기록 표시, 클릭으로 재시작
 
 ## 📝 로그
+- 2026-04-21 : 입력/UX 개선 + 모바일 터치 지원
+  - client/input.js: 마우스 데드존 (중앙 40px 반경 내 정지), 터치 이벤트 추가 (touchstart/move/end), 손 떼면 자동 정지
+  - client/renderer.js: 타겟 커서 (십자선) — 이동 중에만 표시, 거리 비례 투명도, 데드존 진입 시 사라짐
+  - client/renderer.js: HUD 반응형 스케일 (hudScale = VIEW_W/560 기준, 모바일 겹침 방지)
+  - client/renderer.js: 생존 수 우측 상단 텍스트로 이동 (가운데 패널 제거)
+  - client/hud-leaderboard.js: Tab 키 + 🏆 버튼(탭/클릭)으로 리더보드 토글, on/off 투명도 표시
+  - client/renderer.js: canvas cursor:none 적용, 미니맵/리더보드 ctx.scale 기반 스케일 적용
 - 2026-04-20 : 킬로그 피드 + 리더보드 + 파일 정리
   - client/hud-killfeed.js: 킬로그 피드 모듈 (최신 5개, 3초 fade-out, 좌측 하단)
   - client/hud-leaderboard.js: 리더보드 모듈 (킬 수 내림차순 top5, 우측 상단, 내 캐릭터 강조)
