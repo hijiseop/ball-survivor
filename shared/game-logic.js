@@ -2,6 +2,7 @@ import {
     CHAR_SPEED, STOP_DIST, WORLD_W, WORLD_H,
     HIT_W, HIT_H, HIT_OFFSET_X, HIT_OFFSET_Y,
     ATTACK_RANGE, INVINCIBLE_MS,
+    SKILL_STATS,
 } from './constants.js';
 
 /**
@@ -74,4 +75,90 @@ export function applyDamage(target, damage, now) {
         return { died: true, applied: true };
     }
     return { died: false, applied: true };
+}
+
+// ── 스킬 효과 ────────────────────────────────────────────────────
+
+export function levelModifier(attackerLevel, targetLevel) {
+    const diff = attackerLevel - targetLevel;
+    return diff >= 5 ? 1.2 : diff >= 0 ? 1 + diff * 0.04 : Math.max(0.6, 1 + diff * 0.01);
+}
+
+/**
+ * 폭발: 주변 AoE 데미지 (타겟별 레벨 보정 적용)
+ * @returns {{ hits: Array<{target, damage}> }}
+ */
+export function applyExplosion(attacker, allPlayers, level, now) {
+    const idx = level - 1;
+    const stat = SKILL_STATS.explosion;
+    const range = stat.range[idx];
+    const mult  = stat.dmgMult[idx];
+
+    const hits = [];
+    const reflects = [];
+    for (const target of allPlayers) {
+        if (target.id === attacker.id || !target.alive) continue;
+        const dx = target.x - attacker.x;
+        const dy = target.y - attacker.y;
+        if (dx * dx + dy * dy > range * range) continue;
+
+        const baseDmg = Math.max(1, Math.round(attacker.damage * mult * levelModifier(attacker.level, target.level)));
+
+        // 방어막 중이면 데미지 대신 반사
+        if (target.shieldUntil && now < target.shieldUntil) {
+            reflects.push({ target, damage: Math.max(1, Math.round(baseDmg * target.shieldReflect)) });
+            continue;
+        }
+
+        const result = applyDamage(target, baseDmg, now);
+        if (result.applied) hits.push({ target, damage: baseDmg, died: result.died });
+    }
+    return { hits, reflects };
+}
+
+/**
+ * 방어막: 일정 시간 무적 + 반사
+ */
+export function applyShield(player, level, now) {
+    const idx = level - 1;
+    const stat = SKILL_STATS.shield;
+    player.shieldUntil  = now + stat.duration[idx];
+    player.shieldReflect = stat.reflect[idx];
+}
+
+/**
+ * 대시: 마우스 방향으로 순간이동
+ * @returns {{ aoeRange, dmgMult }} — Lv2+ AoE 정보 (호출자에서 데미지 처리)
+ */
+export function applyDash(player, level) {
+    const idx = level - 1;
+    const stat = SKILL_STATS.dash;
+    const dist = stat.distance[idx];
+
+    const dx = player.targetX - player.x;
+    const dy = player.targetY - player.y;
+    const len = Math.sqrt(dx * dx + dy * dy);
+
+    if (len > 1) {
+        player.x = Math.max(0, Math.min(WORLD_W, player.x + (dx / len) * dist));
+        player.y = Math.max(0, Math.min(WORLD_H, player.y + (dy / len) * dist));
+    } else {
+        // 정지 상태면 바라보는 방향으로
+        const dir = player.facingRight ? 1 : -1;
+        player.x = Math.max(0, Math.min(WORLD_W, player.x + dir * dist));
+    }
+    player.targetX = player.x;
+    player.targetY = player.y;
+
+    return { aoeRange: stat.aoeRange[idx], dmgMult: stat.dmgMult[idx] };
+}
+
+/**
+ * 회복: HP 회복
+ */
+export function applyHeal(player, level) {
+    const idx = level - 1;
+    const amount = Math.round(player.maxHp * SKILL_STATS.heal.hpPercent[idx]);
+    player.hp = Math.min(player.maxHp, player.hp + amount);
+    return amount;
 }

@@ -9,6 +9,7 @@ import {
     HIT_W, HIT_H, HIT_OFFSET_X, HIT_OFFSET_Y,
     FRAME_MS, ACTION_STAND, ACTION_WALK, ACTION_ATTACKS,
     INVINCIBLE_MS, ATTACK_INTERVAL, ATTACK_RANGE,
+    SKILL_STATS, ITEM_BLINK_MS, ACTION_SKILLS,
 } from '/shared/constants.js';
 
 const DEBUG_HITBOX = false;
@@ -50,6 +51,13 @@ const hitTimeMap  = new Map();
 const particlesMap   = new Map(); // playerId → particle[]
 const ripplesMap     = new Map(); // playerId → ripple[]
 const effectTrigger  = new Map(); // playerId → lastAttackUntil
+
+// ── 스킬 이펙트 ──────────────────────────────────────────────
+const skillEffects   = [];        // { type, level, x, y, startTime }
+let legendaryUntil   = 0;
+let legendaryMsg     = '';
+let pickupFlashUntil = 0;
+let pickupFlashType  = '';        // 'upgrade' | 'curse' | 'legendary'
 
 function spawnAttackEffects(playerId, cx, cy, innerColor, outerColor, now) {
     // 파티클 12개
@@ -164,6 +172,30 @@ export function notifyHit(targetId, myId) {
     }
 }
 
+export function notifySkillEffect({ playerId, skillType, level, x, y }) {
+    skillEffects.push({ playerId, type: skillType, level, x, y, startTime: Date.now() });
+}
+
+export function notifyItemPickup({ result }) {
+    if (!result) return;
+    const now = Date.now();
+    if (result.legendary) {
+        pickupFlashType  = 'legendary';
+        pickupFlashUntil = now + 1500;
+    } else if (result.curse) {
+        pickupFlashType  = 'curse';
+        pickupFlashUntil = now + 600;
+    } else if (!result.ignored) {
+        pickupFlashType  = 'upgrade';
+        pickupFlashUntil = now + 500;
+    }
+}
+
+export function notifyLegendary(playerName, skillType) {
+    legendaryUntil = Date.now() + 3000;
+    legendaryMsg   = `✨ ${playerName} — 전설 ${skillType} Lv4 획득!`;
+}
+
 // ─────────────────────────────────────────────────────────────
 // 이미지 프리로드 헬퍼
 // ─────────────────────────────────────────────────────────────
@@ -188,13 +220,19 @@ async function loadPlayerImages(base) {
     if (imageCache.has(base)) return;
     imageCache.set(base, null); // 로딩 중 마킹
 
-    const [stand, walk, ...attacks] = await Promise.all([
+    const skillTypes = Object.keys(ACTION_SKILLS);
+    const [stand, walk, ...rest] = await Promise.all([
         preloadFrames(base, ACTION_STAND),
         preloadFrames(base, ACTION_WALK),
         ...ACTION_ATTACKS.map(a => preloadFrames(base, a)),
+        ...skillTypes.map(t => preloadFrames(base, ACTION_SKILLS[t].action, ACTION_SKILLS[t].maxFrames)),
     ]);
 
-    imageCache.set(base, { stand, walk, attacks });
+    const attacks = rest.slice(0, ACTION_ATTACKS.length);
+    const skillFrames = {};
+    skillTypes.forEach((t, i) => { skillFrames[t] = rest[ACTION_ATTACKS.length + i]; });
+
+    imageCache.set(base, { stand, walk, attacks, skills: skillFrames });
 
     const sample = stand[0] || walk[0];
     if (sample) {
@@ -218,14 +256,27 @@ function getImageBase(url) {
 // ─────────────────────────────────────────────────────────────
 function resolveFrame(player, base, now) {
     if (!animState.has(player.id)) {
-        animState.set(player.id, { key: 'stand', frame: 0, lastFrameTime: now, walkUntil: 0, attackSeq: [], lastAttackUntil: 0 });
+        animState.set(player.id, {
+            key: 'stand', frame: 0, lastFrameTime: now,
+            walkUntil: 0,
+            attackSeq: [], lastAttackUntil: 0,
+            lastSkillUntil: 0,
+        });
     }
-    const anim = animState.get(player.id);
+    const anim   = animState.get(player.id);
     const frames = imageCache.get(base);
 
-    const isAttacking = now < player.attackUntil;
+    const isSkilling  = now < player.skillUntil;
+    const isAttacking = !isSkilling && now < player.attackUntil;
 
-    // attackUntil 이 바뀌면 새 공격 → A13/A14/A15 중 하나 랜덤 선택
+    // 스킬 모션: skillUntil이 새로 시작될 때 초기화
+    if (isSkilling && anim.lastSkillUntil !== player.skillUntil) {
+        anim.lastSkillUntil = player.skillUntil;
+        anim.frame = 0;
+        anim.lastFrameTime = now;
+    }
+
+    // 공격 모션: attackUntil이 새로 시작될 때 랜덤 선택
     if (isAttacking && anim.lastAttackUntil !== player.attackUntil) {
         anim.lastAttackUntil = player.attackUntil;
         anim.frame = 0;
@@ -236,8 +287,10 @@ function resolveFrame(player, base, now) {
         }
     }
 
-    const isWalking = !isAttacking && now < anim.walkUntil;
-    const nextKey   = isAttacking ? 'attack' : isWalking ? 'walk' : 'stand';
+    const isWalking = !isSkilling && !isAttacking && now < anim.walkUntil;
+
+    // 우선순위: 스킬 > 공격 > 걷기 > 기본
+    const nextKey = isSkilling ? 'skill' : isAttacking ? 'attack' : isWalking ? 'walk' : 'stand';
 
     if (nextKey !== anim.key) {
         anim.key = nextKey;
@@ -251,6 +304,14 @@ function resolveFrame(player, base, now) {
 
     if (!frames) return null;
 
+    if (isSkilling) {
+        const type = player.skillType;
+        const pool = frames.skills?.[type];
+        if (pool?.length) return pool[anim.frame % pool.length];
+        // 스킬 모션 없으면 공격 모션 fallback
+        const seq = anim.attackSeq.length ? anim.attackSeq : (frames.attacks ?? []).flat();
+        return seq.length ? seq[anim.frame % seq.length] : null;
+    }
     if (isAttacking) {
         const seq = anim.attackSeq.length ? anim.attackSeq : (frames.attacks ?? []).flat();
         return seq.length ? seq[anim.frame % seq.length] : null;
@@ -300,7 +361,7 @@ function interpPlayers(prevArr, currArr, t) {
 // ─────────────────────────────────────────────────────────────
 // 메인 렌더
 // ─────────────────────────────────────────────────────────────
-export function render(prevPlayers, currPlayers, t, myId, now) {
+export function render(prevPlayers, currPlayers, t, myId, now, items = []) {
     if (!ctx) return;
 
     // 보간된 플레이어 목록
@@ -343,6 +404,18 @@ export function render(prevPlayers, currPlayers, t, myId, now) {
         ctx.fillRect(0, 0, WORLD_W, WORLD_H);
     }
 
+    // 아이템
+    drawItems(items, now);
+
+    // 스킬 이펙트 (월드 공간)
+    drawSkillEffects(now);
+
+    // 방어막 글로우 (플레이어 아래 레이어)
+    for (const p of players) {
+        const hasShield = p.shieldUntil ? p.shieldUntil > now : p.shieldActive;
+        if (p.alive && hasShield) drawShieldGlow(p, now);
+    }
+
     // 사망 플레이어 먼저 (반투명) → 생존 플레이어
     for (const p of players) {
         if (p.alive) continue;
@@ -363,11 +436,43 @@ export function render(prevPlayers, currPlayers, t, myId, now) {
         ctx.fillRect(0, 0, VIEW_W, VIEW_H);
     }
 
+    // ── 픽업 플래시 ──────────────────────────────────────────
+    if (now < pickupFlashUntil) {
+        const t2 = 1 - (now - (pickupFlashUntil - (pickupFlashType === 'legendary' ? 1500 : pickupFlashType === 'curse' ? 600 : 500))) / (pickupFlashType === 'legendary' ? 1500 : pickupFlashType === 'curse' ? 600 : 500);
+        const alpha = 0.4 * Math.max(0, t2);
+        if (pickupFlashType === 'legendary') {
+            const hue = (now / 5) % 360;
+            ctx.fillStyle = `hsla(${hue},100%,60%,${alpha})`;
+        } else if (pickupFlashType === 'curse') {
+            ctx.fillStyle = `rgba(180,0,200,${alpha})`;
+        } else {
+            ctx.fillStyle = `rgba(255,220,0,${alpha})`;
+        }
+        ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+    }
+
+    // ── 레전더리 메시지 ──────────────────────────────────────
+    if (now < legendaryUntil) {
+        const elapsed = legendaryUntil - now;
+        const alpha = Math.min(1, elapsed / 500);
+        const hue = (now / 8) % 360;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.font = 'bold 22px Arial';
+        ctx.textAlign = 'center';
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = `hsl(${hue},100%,60%)`;
+        ctx.fillStyle = `hsl(${hue},100%,70%)`;
+        ctx.fillText(legendaryMsg, VIEW_W / 2, VIEW_H / 2 - 40);
+        ctx.restore();
+    }
+
     // ── 스크린 공간 (HUD + 미니맵) ───────────────────────────
     if (me) {
         const hudScale = Math.min(1, VIEW_W / 560);
         drawHUD(me, currPlayers, hudScale);
         drawMinimap(players, me, hudScale);
+        drawSkillHUD(me, now, hudScale);
         if (_showLeaderboard) Leaderboard.draw(ctx, currPlayers, myId, VIEW_W, hudScale);
     }
     KillFeed.draw(ctx, VIEW_W, VIEW_H);
@@ -728,6 +833,273 @@ function drawMinimap(players, me, s) {
     ctx.strokeStyle = '#555';
     ctx.lineWidth = 1;
     ctx.strokeRect(MX, MY, MM_W, MM_H);
+
+    ctx.restore();
+}
+
+// ─────────────────────────────────────────────────────────────
+// 아이템 (월드 공간)
+// ─────────────────────────────────────────────────────────────
+function drawItems(items, now) {
+    for (const item of items) {
+        const remaining = item.expiresAt - now;
+        const isBlinking = remaining < ITEM_BLINK_MS;
+        if (isBlinking && Math.floor(now / 200) % 2 === 0) continue; // 깜빡임
+
+        const pulse = 0.7 + 0.3 * Math.sin(now / 300);
+        const r = 10 * pulse;
+
+        ctx.save();
+        ctx.shadowBlur = 20 * pulse;
+        ctx.shadowColor = '#ffe066';
+        const grad = ctx.createRadialGradient(item.x, item.y, 0, item.x, item.y, r);
+        grad.addColorStop(0, '#ffffff');
+        grad.addColorStop(0.4, '#ffe066');
+        grad.addColorStop(1, 'rgba(255,200,0,0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(item.x, item.y, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // ? 텍스트
+        ctx.save();
+        ctx.fillStyle = '#fff';
+        ctx.font = `bold ${Math.round(10 * pulse)}px Arial`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('?', item.x, item.y);
+        ctx.restore();
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
+// 방어막 글로우 (월드 공간)
+// ─────────────────────────────────────────────────────────────
+function drawShieldGlow(player, now) {
+    const cx = player.x + HIT_OFFSET_X;
+    const cy = player.y + HIT_OFFSET_Y;
+    const pulse = 0.85 + 0.15 * Math.sin(now / 150);
+    const r = 36 * pulse;
+
+    ctx.save();
+    ctx.shadowBlur = 30;
+    ctx.shadowColor = '#4fc3f7';
+    const grad = ctx.createRadialGradient(cx, cy, r * 0.5, cx, cy, r);
+    grad.addColorStop(0, 'rgba(79,195,247,0.15)');
+    grad.addColorStop(0.7, 'rgba(79,195,247,0.35)');
+    grad.addColorStop(1, 'rgba(79,195,247,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(79,195,247,0.8)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+}
+
+// ─────────────────────────────────────────────────────────────
+// 스킬 이펙트 (월드 공간)
+// ─────────────────────────────────────────────────────────────
+const SKILL_COLORS = {
+    explosion: { inner: '#ff6b35', outer: '#ff1744' },
+    shield:    { inner: '#4fc3f7', outer: '#0288d1' },
+    dash:      { inner: '#b2ff59', outer: '#00e676' },
+    heal:      { inner: '#69f0ae', outer: '#00c853' },
+};
+
+function drawSkillEffects(now) {
+    for (let i = skillEffects.length - 1; i >= 0; i--) {
+        const e = skillEffects[i];
+        const elapsed = now - e.startTime;
+        const duration = 600;
+        if (elapsed > duration) { skillEffects.splice(i, 1); continue; }
+
+        const t = elapsed / duration;
+        const col = SKILL_COLORS[e.type] || SKILL_COLORS.explosion;
+
+        ctx.save();
+        ctx.globalAlpha = 1 - t;
+
+        if (e.type === 'explosion') {
+            const lvIdx = e.level - 1;
+            const range = SKILL_STATS.explosion.range[lvIdx] ?? 120;
+
+            // 실제 피격 범위와 동일한 고정 원 — 페이드아웃
+            ctx.shadowBlur = 30;
+            ctx.shadowColor = col.outer;
+            ctx.strokeStyle = col.outer;
+            ctx.lineWidth = 3 * (1 - t);
+            ctx.beginPath();
+            ctx.arc(e.x, e.y, range, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // 내부 플래시 (0 → range * 0.9, 빠르게 채움)
+            const innerR = range * 0.9 * Math.min(1, t * 4);
+            const grad = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, innerR);
+            grad.addColorStop(0, col.inner + 'aa');
+            grad.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(e.x, e.y, innerR, 0, Math.PI * 2);
+            ctx.fill();
+
+        } else if (e.type === 'dash') {
+            // 대시 트레일
+            for (let j = 0; j < 6; j++) {
+                const jr = (j / 6) * 40;
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = col.inner;
+                ctx.fillStyle = col.inner;
+                ctx.beginPath();
+                ctx.arc(e.x - jr, e.y, 6 * (1 - j / 6) * (1 - t), 0, Math.PI * 2);
+                ctx.fill();
+            }
+            // Lv2+ 실제 AoE 범위 원 (고정 반지름, 페이드아웃)
+            const dashAoeRange = SKILL_STATS.dash.aoeRange[e.level - 1] ?? 0;
+            if (dashAoeRange > 0) {
+                ctx.shadowBlur = 20;
+                ctx.shadowColor = col.inner;
+                ctx.strokeStyle = col.inner;
+                ctx.lineWidth = 2 * (1 - t);
+                ctx.beginPath();
+                ctx.arc(e.x, e.y, dashAoeRange, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+
+        } else if (e.type === 'heal') {
+            // 상승 파티클
+            for (let j = 0; j < 8; j++) {
+                const angle = (j / 8) * Math.PI * 2;
+                const r = 30 + t * 60;
+                const px = e.x + Math.cos(angle) * r;
+                const py = e.y + Math.sin(angle) * r - t * 40;
+                ctx.shadowBlur = 10;
+                ctx.shadowColor = col.inner;
+                ctx.fillStyle = col.inner;
+                ctx.beginPath();
+                ctx.arc(px, py, 4 * (1 - t), 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+        } else if (e.type === 'shield') {
+            // 실드 활성화 링
+            const r = 36 + t * 60;
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = col.inner;
+            ctx.strokeStyle = col.inner;
+            ctx.lineWidth = 3 * (1 - t);
+            ctx.beginPath();
+            ctx.arc(e.x + HIT_OFFSET_X, e.y + HIT_OFFSET_Y, r, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+
+        ctx.restore();
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
+// 스킬 슬롯 HUD (스크린 공간)
+// ─────────────────────────────────────────────────────────────
+const SKILL_ICONS = { explosion: '💣', shield: '🛡', dash: '💨', heal: '💉' };
+const SKILL_SLOT_KEYS = ['Q', 'E', 'R'];
+const SLOT_SIZE = 48;
+const SLOT_GAP  = 8;
+
+function drawSkillHUD(me, now, s) {
+    if (!me.skills) return;
+    const totalW = (SLOT_SIZE * 3 + SLOT_GAP * 2) * s;
+    const startX = (VIEW_W - totalW) / 2;
+    const startY = VIEW_H - (SLOT_SIZE + 16) * s;
+
+    ctx.save();
+    ctx.scale(s, s);
+    const sx0 = startX / s;
+    const sy0 = startY / s;
+
+    for (let i = 0; i < 3; i++) {
+        const slot = me.skills[i];
+        const bx = sx0 + i * (SLOT_SIZE + SLOT_GAP);
+        const by = sy0;
+
+        // 슬롯 배경
+        ctx.fillStyle = slot ? 'rgba(10,10,30,0.85)' : 'rgba(10,10,30,0.45)';
+        ctx.strokeStyle = slot ? '#666' : '#333';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.roundRect(bx, by, SLOT_SIZE, SLOT_SIZE, 6);
+        ctx.fill();
+        ctx.stroke();
+
+        if (!slot) {
+            // 빈 슬롯
+            ctx.fillStyle = '#444';
+            ctx.font = '10px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(SKILL_SLOT_KEYS[i], bx + SLOT_SIZE / 2, by + SLOT_SIZE / 2 + 4);
+            continue;
+        }
+
+        // 쿨다운 오버레이
+        const cdRemain = Math.max(0, slot.cooldownUntil - now);
+        const totalCd = SKILL_STATS[slot.type].cooldown[slot.level - 1];
+        const cdRatio = cdRemain / totalCd;
+
+        // 스킬 아이콘
+        ctx.font = `${SLOT_SIZE * 0.5}px Arial`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.globalAlpha = cdRatio > 0 ? 0.4 : 1;
+        ctx.fillText(SKILL_ICONS[slot.type] ?? '?', bx + SLOT_SIZE / 2, by + SLOT_SIZE / 2 - 4);
+        ctx.globalAlpha = 1;
+
+        // 쿨다운 어두운 오버레이 (시계 방향)
+        if (cdRatio > 0) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(bx + SLOT_SIZE / 2, by + SLOT_SIZE / 2);
+            ctx.arc(bx + SLOT_SIZE / 2, by + SLOT_SIZE / 2, SLOT_SIZE, -Math.PI / 2, -Math.PI / 2 + cdRatio * Math.PI * 2);
+            ctx.closePath();
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.fill();
+            ctx.restore();
+
+            // 쿨다운 숫자
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 11px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText((cdRemain / 1000).toFixed(1), bx + SLOT_SIZE / 2, by + SLOT_SIZE / 2 + 6);
+        }
+
+        // 레벨 표시
+        const lvColor = slot.level === 4 ? '#ffd700' : slot.level === 3 ? '#ce93d8' : slot.level === 2 ? '#80cbc4' : '#aaa';
+        ctx.fillStyle = lvColor;
+        ctx.font = `bold 10px Arial`;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText(`Lv${slot.level}`, bx + 3, by + SLOT_SIZE - 3);
+
+        // 단축키
+        ctx.fillStyle = '#888';
+        ctx.font = '9px Arial';
+        ctx.textAlign = 'right';
+        ctx.fillText(SKILL_SLOT_KEYS[i], bx + SLOT_SIZE - 3, by + SLOT_SIZE - 3);
+
+        // Lv4 레인보우 테두리
+        if (slot.level === 4) {
+            const hue = (now / 6) % 360;
+            ctx.strokeStyle = `hsl(${hue},100%,60%)`;
+            ctx.lineWidth = 2.5;
+            ctx.shadowBlur = 12;
+            ctx.shadowColor = `hsl(${hue},100%,60%)`;
+            ctx.beginPath();
+            ctx.roundRect(bx, by, SLOT_SIZE, SLOT_SIZE, 6);
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+        }
+    }
 
     ctx.restore();
 }

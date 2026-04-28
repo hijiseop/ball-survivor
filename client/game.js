@@ -14,6 +14,7 @@ let joined     = false;
 // 서버 상태 보간용 (이전 / 현재)
 let prevPlayers = [];
 let currPlayers = [];
+let currItems   = [];
 let stateTime   = 0;
 
 // ── 진입점 ────────────────────────────────────────────────────
@@ -30,6 +31,9 @@ async function init() {
 
     // 3. Input 리스너 등록
     Input.init(Renderer.getCanvas());
+    Input.onSkillInput((slotIndex) => {
+        if (joined) Network.sendSkill(slotIndex);
+    });
 
     // 4. Socket.io 연결 + 이벤트 핸들러
     Network.connect();
@@ -44,6 +48,7 @@ async function init() {
     Network.on('state', state => {
         prevPlayers = currPlayers;
         currPlayers = state.players;
+        currItems   = state.items || [];
         stateTime   = Date.now();
     });
 
@@ -53,6 +58,19 @@ async function init() {
 
     Network.on('kill', ({ killerName, victimName }) => {
         KillFeed.addKill(killerName, victimName);
+    });
+
+    Network.on('itemPickup', (data) => {
+        Renderer.notifyItemPickup(data);
+    });
+
+    Network.on('skillEffect', (data) => {
+        Renderer.notifySkillEffect(data);
+    });
+
+    Network.on('legendaryDrop', ({ playerName, skillType }) => {
+        Renderer.notifyLegendary(playerName, skillType);
+        KillFeed.addKill(`✨ ${playerName}`, `전설 ${skillType} Lv4 획득!`);
     });
 
     Network.on('roomFull', () => {
@@ -82,7 +100,7 @@ function renderLoop() {
     const t = stateTime > 0 ? (now - stateTime) / SERVER_TICK_MS : 0;
 
     Input.update();
-    Renderer.render(prevPlayers, currPlayers, t, myId, now);
+    Renderer.render(prevPlayers, currPlayers, t, myId, now, currItems);
 
     requestAnimationFrame(renderLoop);
 }

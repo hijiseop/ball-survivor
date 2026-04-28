@@ -100,6 +100,29 @@
 - 생존 시간 / 최고 기록 표시, 클릭으로 재시작
 
 ## 📝 로그
+- 2026-04-28 : 스킬 밸런스 + 이펙트 정확도 개선
+  - shared/game-logic.js: levelModifier() 헬퍼 export — 레벨 차 보정 공식 단일화
+  - shared/game-logic.js: applyExplosion — baseDmg 계산을 타겟 루프 안으로 이동, 타겟별 레벨 보정 적용 (반사 데미지도 자동 반영)
+  - server/game-room.js: 대쉬 AoE — dmg 계산을 루프 안으로 이동, 타겟별 levelModifier 적용
+  - server/game-room.js: 대쉬 AoE — 방어막 대상에 반사 데미지 적용 (기존: 스킵만, 폭발·자동공격과 통일)
+  - client/renderer.js: 폭발 이펙트 링 반지름을 실제 피격 range 고정값으로 수정 (기존: range×0.5~2.0 확장)
+  - client/renderer.js: 대쉬 Lv2+ AoE 범위 원 추가 (Lv2=80px, Lv3=120px, Lv4=180px, 페이드아웃)
+  - client/renderer.js: 맨 끝 여분 `}` 제거 (SyntaxError → 모듈 로드 실패 버그 수정)
+  - shared/constants.js: ACTION_SKILLS 액션 코드 수정 — explosion A19→A16(4f), shield A30→A23(4f), dash A25→A29(4f)
+  - client/renderer.js: 스킬 모션 프레임 없을 때 공격 모션 fallback 처리
+  - .env: DEBUG_START_SKILLS=true 추가 (테스트용 — 입장 시 슬롯 3개 자동 장착)
+- 2026-04-28 : 스킬 애니메이션 액션 코드 수정 + 스킬 모션 우선순위 정리
+  - shared/constants.js: ACTION_SKILLS 액션 코드 수정 — explosion A19→A16(4f), shield A30→A23(4f), dash A25→A29(4f), heal A10 유지(3f)
+  - client/renderer.js: 스킬 모션 프레임 없을 때 공격 모션으로 fallback 처리 (null 반환 → 폴백 원 표시 방지)
+  - 우선순위 확인: 스킬 > 공격 > 걷기 > 기본 (기존 로직 유지, 스킬-공격 중복 시 스킬 모션 우선)
+- 2026-04-28 : 랜덤 아이템 스킬 시스템 구현
+  - shared/constants.js: SKILL_TYPES, SKILL_STATS(4종×4레벨), 아이템 확률/타이머 상수 추가
+  - shared/game-logic.js: applyExplosion/applyShield/applyDash/applyHeal 스킬 효과 함수
+  - server/player.js: skills[3] 슬롯, shieldUntil/shieldReflect 필드, hasLv3Skill()
+  - server/game-room.js: 아이템 스폰(15초), 타이머(10초), 픽업, 슬롯 교체, 저주/전설, useSkill(), 방어막 반사
+  - server/index.js: skill 이벤트 핸들러
+  - client: Q/E/R 단축키, 스킬 HUD(3슬롯+쿨다운+Lv4 레인보우), 이펙트 4종, 픽업 플래시, 전설 메시지
+  - 아이템 확률: Lv1(55%) Lv2(20%) Lv3(9%) 저주(16%) Lv4(0.05%/Lv3보유자)
 - 2026-04-21 : 입력/UX 개선 + 모바일 터치 지원
   - client/input.js: 마우스 데드존 (중앙 40px 반경 내 정지), 터치 이벤트 추가 (touchstart/move/end), 손 떼면 자동 정지
   - client/renderer.js: 타겟 커서 (십자선) — 이동 중에만 표시, 거리 비례 투명도, 데드존 진입 시 사라짐
@@ -167,4 +190,4 @@
 - 멀티탭 통합 테스트 (브라우저 2개 이상으로 실제 PvP 검증)
 - 리스폰 (사망 후 3초 뒤 랜덤 위치)
 - 축소 존 (배틀로얄 존)
-- HP 회복 아이템 드롭
+- 모바일 스킬 버튼 UI (game.html에 Q/E/R 터치 버튼 추가)

@@ -35,3 +35,53 @@ export const MAX_PLAYERS = 20;             // 방 최대 인원
 export const ACTION_STAND = 'A00';
 export const ACTION_WALK = 'A02';
 export const ACTION_ATTACKS = ['A13', 'A14', 'A15'];
+
+// 스킬별 전용 모션
+export const ACTION_SKILLS = {
+    explosion: { action: 'A16', maxFrames: 4 },
+    shield:    { action: 'A23', maxFrames: 4 },
+    dash:      { action: 'A29', maxFrames: 4 },
+    heal:      { action: 'A10', maxFrames: 3 },
+};
+export const SKILL_MOTION_MS = 480; // 스킬 모션 지속 시간
+
+// ── 스킬 아이템 ──────────────────────────────────────────────────
+export const MAX_SKILL_SLOTS    = 3;
+export const MAX_ITEMS          = 5;
+export const ITEM_SPAWN_INTERVAL = 15000; // ms
+export const ITEM_EXPIRE_MS     = 10000;  // 10초 후 소멸
+export const ITEM_BLINK_MS      = 3000;   // 마지막 3초 깜빡임
+export const ITEM_PICKUP_RANGE  = 50;     // px
+
+export const SKILL_TYPES = ['explosion', 'shield', 'dash', 'heal'];
+
+// 아이템 레벨 확률 (누적)
+export const ITEM_PROB_LV1   = 0.55;
+export const ITEM_PROB_LV2   = 0.75;
+export const ITEM_PROB_LV3   = 0.84;
+// 0.84 ~ 1.00 = 저주 (16%)
+export const ITEM_PROB_LV4   = 0.0005; // Lv3 보유자만, 별도 체크
+
+// 레벨별 스킬 스탯 (인덱스 0=Lv1, 1=Lv2, 2=Lv3, 3=Lv4)
+export const SKILL_STATS = {
+    explosion: {
+        cooldown: [15000, 13000, 10000, 6000],
+        range:    [120,   156,   192,   240],
+        dmgMult:  [2.0,   3.0,   4.5,   8.0],
+    },
+    shield: {
+        cooldown:  [20000, 18000, 15000, 10000],
+        duration:  [2000,  2500,  3000,  4000],
+        reflect:   [0.5,   0.75,  1.0,   1.5],
+    },
+    dash: {
+        cooldown:  [10000, 9000, 8000, 5000],
+        distance:  [200,   260,  320,  400],
+        aoeRange:  [0,     80,   120,  180],
+        dmgMult:   [0,     1.5,  2.0,  3.0],
+    },
+    heal: {
+        cooldown:   [25000, 22000, 18000, 12000],
+        hpPercent:  [0.30,  0.45,  0.60,  1.00],
+    },
+};

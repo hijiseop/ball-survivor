@@ -1,12 +1,16 @@
 // client/input.js — 마우스/터치 입력 → 월드 좌표 변환
 
-const DEAD_ZONE = 40; // 마우스 전용 (터치는 데드존 없음)
+const DEAD_ZONE = 40;
 
 let _screenX = 0;
 let _screenY = 0;
 let _viewW = 0;
 let _viewH = 0;
 let _isTouching = false;
+
+// 스킬 발동 콜백 (game.js에서 등록)
+let _onSkill = null;
+export function onSkillInput(cb) { _onSkill = cb; }
 
 export function init(canvas) {
     _viewW = canvas.width;
@@ -43,10 +47,16 @@ export function init(canvas) {
     canvas.addEventListener('touchend', e => {
         e.preventDefault();
         _isTouching = false;
-        // 손 떼면 타겟을 중앙(플레이어)으로 → 정지
         _screenX = _viewW / 2;
         _screenY = _viewH / 2;
     }, { passive: false });
+
+    // Q/E/R 스킬 단축키
+    window.addEventListener('keydown', e => {
+        if (e.key === 'q' || e.key === 'Q') _onSkill?.(0);
+        if (e.key === 'e' || e.key === 'E') _onSkill?.(1);
+        if (e.key === 'r' || e.key === 'R') _onSkill?.(2);
+    });
 }
 
 export function update() {}

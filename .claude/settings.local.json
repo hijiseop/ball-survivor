@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(timeout 5 node server/index.js)"
+      "Bash(timeout 5 node server/index.js)",
+      "Bash(node --input-type=module)"
     ]
   }
 }

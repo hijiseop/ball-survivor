@@ -10,6 +10,12 @@ import { getCharacterList, getCharacterBasicData } from './services/mapleStorySe
 import { GameRoom } from './game-room.js';
 import { WORLD_W, WORLD_H, SERVER_TICK_RATE } from '../shared/constants.js';
 
+if (process.env.NODE_ENV === 'production') {
+    if (process.env.DEBUG_ITEM_LEVEL || process.env.DEBUG_START_SKILLS === 'true') {
+        throw new Error('디버그 플래그가 프로덕션에서 활성화되어 있습니다!');
+    }
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const ROOT = join(__dirname, '..');
@@ -141,10 +147,14 @@ io.on('connection', (socket) => {
     });
 
     socket.on('input', ({ targetX, targetY }) => {
-        // 숫자 타입 + 유한값 검증 — NaN/Infinity 전송으로 게임 상태 오염 방지
         if (typeof targetX !== 'number' || typeof targetY !== 'number') return;
         if (!isFinite(targetX) || !isFinite(targetY)) return;
         room.setInput(socket.id, targetX, targetY);
+    });
+
+    socket.on('skill', ({ slotIndex }) => {
+        if (typeof slotIndex !== 'number' || slotIndex < 0 || slotIndex > 2) return;
+        room.useSkill(socket.id, slotIndex);
     });
 
     socket.on('disconnect', () => {

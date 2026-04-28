@@ -9,7 +9,8 @@ const _handlers = {};
 export function connect() {
     _socket = io();
 
-    for (const evt of ['welcome', 'state', 'hit', 'kill', 'playerJoin', 'playerLeave', 'disconnect', 'roomFull']) {
+    for (const evt of ['welcome', 'state', 'hit', 'kill', 'playerJoin', 'playerLeave', 'disconnect', 'roomFull',
+                       'itemSpawn', 'itemPickup', 'itemExpire', 'skillEffect', 'legendaryDrop']) {
         _socket.on(evt, data => _handlers[evt]?.(data));
     }
 }
@@ -33,11 +34,12 @@ export function sendInput(targetX, targetY) {
     }
 }
 
-/**
- * 이벤트 핸들러 등록
- * @param {string} event - 'welcome' | 'state' | 'hit' | 'kill' | 'playerJoin' | 'playerLeave' | 'disconnect'
- * @param {Function} handler
- */
+export function sendSkill(slotIndex) {
+    if (_socket?.connected) {
+        _socket.emit('skill', { slotIndex });
+    }
+}
+
 export function on(event, handler) {
     _handlers[event] = handler;
 }
