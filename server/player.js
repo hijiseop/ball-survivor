@@ -1,4 +1,4 @@
-import { WORLD_W, WORLD_H, MAX_SKILL_SLOTS } from '../shared/constants.js';
+import { WORLD_W, WORLD_H, MAX_SKILL_SLOTS, RESPAWN_DELAY_MS, RESPAWN_INVINCIBLE_MS } from '../shared/constants.js';
 
 export class Player {
     constructor(id, name, characterLevel, combatPower, characterImageUrl, combatPowerRaw = 0, bossDmg = 0, critDmg = 0) {
@@ -22,6 +22,8 @@ export class Player {
         this.invincibleUntil = 0;
         this.alive = true;
         this.kills = 0;
+        this.deaths = 0;
+        this.respawnAt = 0;
         this.characterImageUrl = characterImageUrl || '';
 
         // 스킬 슬롯: null | { type, level, cooldownUntil }
@@ -35,6 +37,29 @@ export class Player {
 
     hasLv3Skill() {
         return this.skills.some(s => s && s.level >= 3);
+    }
+
+    die(now) {
+        this.alive = false;
+        this.deaths++;
+        this.respawnAt = now + RESPAWN_DELAY_MS;
+    }
+
+    respawn(now) {
+        this.x = Math.random() * (WORLD_W - 100) + 50;
+        this.y = Math.random() * (WORLD_H - 100) + 50;
+        this.targetX = this.x;
+        this.targetY = this.y;
+        this.hp = this.maxHp;
+        this.alive = true;
+        this.respawnAt = 0;
+        this.invincibleUntil = now + RESPAWN_INVINCIBLE_MS;
+        this.shieldUntil = 0;
+        this.shieldReflect = 0;
+        this.nextAttackAt = now + 2000;
+        for (const skill of this.skills) {
+            if (skill) skill.cooldownUntil = 0;
+        }
     }
 
     // 본인에게만 전송 — 쿨다운 정확한 타임스탬프 포함
@@ -51,6 +76,8 @@ export class Player {
             nextAttackAt: this.nextAttackAt,
             alive: this.alive,
             kills: this.kills,
+            deaths: this.deaths,
+            respawnAt: this.respawnAt,
             combatPower: this.combatPower,
             damage: this.damage,
             characterImageUrl: this.characterImageUrl,
@@ -76,6 +103,7 @@ export class Player {
             nextAttackAt: this.nextAttackAt,
             alive: this.alive,
             kills: this.kills,
+            deaths: this.deaths,
             combatPower: this.combatPower,
             damage: this.damage,
             characterImageUrl: this.characterImageUrl,

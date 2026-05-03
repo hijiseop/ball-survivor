@@ -16,6 +16,10 @@
 - [x] 실시간 리더보드 (우측 상단, 킬 수 기준 top5)
 - [x] 파일 구조 정리 (services/ → server/services/, 구버전 server.js 삭제)
 - [x] 문서 동기화 (README, SPEC, PROGRESS 현행화)
+- [x] 리스폰 시스템 (사망 후 3초 부활, 2초 무적)
+- [x] 모바일 스킬 버튼 UI (터치 영역 등록)
+- [x] 관전 모드 (사망 시 자동 전환, 좌우 키/터치로 대상 변경)
+- [x] 게임 종료 화면 (순위표 + 5초 후 자동 재시작)
 
 ## ✅ 완료 항목
 
@@ -100,6 +104,26 @@
 - 생존 시간 / 최고 기록 표시, 클릭으로 재시작
 
 ## 📝 로그
+- 2026-05-03 : 모바일 스킬 버튼 + 관전 모드 구현
+  - client/input.js: registerSkillAreas() — 터치 영역 등록, touchend에서 스킬 슬롯 감지
+  - client/input.js: onSpectateInput() — 좌우 화살표/터치로 관전 대상 전환
+  - client/renderer.js: drawSkillHUD()에서 터치 영역 등록, drawSpectateHUD() 관전 UI
+  - client/game.js: spectateTargetId 상태 관리, 사망 시 자동 관전 전환, 부활 시 복귀
+- 2026-05-03 : 게임 종료 화면 구현
+  - shared/constants.js: GAME_RESTART_DELAY_MS(5초), MIN_PLAYERS_FOR_GAME(2명) 상수 추가
+  - server/game-room.js: _checkGameOver(), _restartGame() 메서드, gameOver/gameRestart 이벤트
+  - client/network.js: gameOver, gameRestart 이벤트 핸들러 등록
+  - client/renderer.js: drawGameOver() — 순위표 + 재시작 카운트다운 오버레이
+  - client/game.js: gameOver, gameRestart 이벤트 처리
+- 2026-05-03 : 리스폰 시스템 구현
+  - shared/constants.js: RESPAWN_DELAY_MS(3초), RESPAWN_INVINCIBLE_MS(2초) 상수 추가
+  - server/player.js: die(), respawn() 메서드 추가, deaths/respawnAt 필드 추가
+  - server/game-room.js: _tick()에서 리스폰 처리, respawn 이벤트 브로드캐스트
+  - client/network.js: respawn 이벤트 핸들러 등록
+  - client/renderer.js: drawRespawnCountdown() — 사망 시 화면 중앙 카운트다운 표시
+- 2026-05-03 : 리팩토링 — levelModifier() 적용 + _emitHit/_emitKill 헬퍼 추출
+  - server/game-room.js: 자동공격 데미지 계산 인라인 → levelModifier() 호출로 대체
+  - server/game-room.js: _emitHit(), _emitKill() 헬퍼 메서드 추가, 모든 hit/kill emit 대체
 - 2026-04-28 : 스킬 밸런스 + 이펙트 정확도 개선
   - shared/game-logic.js: levelModifier() 헬퍼 export — 레벨 차 보정 공식 단일화
   - shared/game-logic.js: applyExplosion — baseDmg 계산을 타겟 루프 안으로 이동, 타겟별 레벨 보정 적용 (반사 데미지도 자동 반영)
@@ -187,7 +211,13 @@
 - 2026-04-15 : 캐릭터 머리 위 반투명 HP바 추가
 
 ## 🔜 다음 목표
-- 멀티탭 통합 테스트 (브라우저 2개 이상으로 실제 PvP 검증)
-- 리스폰 (사망 후 3초 뒤 랜덤 위치)
-- 축소 존 (배틀로얄 존)
-- 모바일 스킬 버튼 UI (game.html에 Q/E/R 터치 버튼 추가)
+(현재 없음)
+
+## ✅ 이전 목표 (완료)
+- [x] 멀티탭 통합 테스트 (브라우저 2개 이상으로 실제 PvP 검증)
+- [x] 리스폰 시스템 (사망 후 3초 뒤 랜덤 위치 부활)
+- [x] 모바일 스킬 버튼 UI (터치 영역 등록 + 스킬 발동)
+- [x] 관전 모드 (사망 후 다른 플레이어 시점 전환)
+- [x] 게임 종료 화면 (최종 순위 + 스탯 요약)
+- [x] 리팩토링: levelModifier() 함수 적용
+- [x] 리팩토링: _emitHit/_emitKill 헬퍼 추출

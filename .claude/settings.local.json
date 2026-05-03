@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(timeout 5 node server/index.js)",
-      "Bash(node --input-type=module)"
+      "Bash(node --input-type=module)",
+      "Bash(node -e \"console.log\\(require\\('crypto'\\).randomBytes\\(32\\).toString\\('hex'\\)\\)\")"
     ]
   }
 }

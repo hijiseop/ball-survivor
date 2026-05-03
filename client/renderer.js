@@ -10,6 +10,7 @@ import {
     FRAME_MS, ACTION_STAND, ACTION_WALK, ACTION_ATTACKS,
     INVINCIBLE_MS, ATTACK_INTERVAL, ATTACK_RANGE,
     SKILL_STATS, ITEM_BLINK_MS, ACTION_SKILLS,
+    RESPAWN_DELAY_MS, GAME_RESTART_DELAY_MS,
 } from '/shared/constants.js';
 
 const DEBUG_HITBOX = false;
@@ -58,6 +59,10 @@ let legendaryUntil   = 0;
 let legendaryMsg     = '';
 let pickupFlashUntil = 0;
 let pickupFlashType  = '';        // 'upgrade' | 'curse' | 'legendary'
+
+// ── 게임 종료 ────────────────────────────────────────────────
+let _gameOverData    = null;      // { winnerId, winnerName, rankings, restartIn }
+let _gameOverAt      = 0;
 
 function spawnAttackEffects(playerId, cx, cy, innerColor, outerColor, now) {
     // 파티클 12개
@@ -194,6 +199,16 @@ export function notifyItemPickup({ result }) {
 export function notifyLegendary(playerName, skillType) {
     legendaryUntil = Date.now() + 3000;
     legendaryMsg   = `✨ ${playerName} — 전설 ${skillType} Lv4 획득!`;
+}
+
+export function notifyGameOver(data) {
+    _gameOverData = data;
+    _gameOverAt = Date.now();
+}
+
+export function notifyGameRestart() {
+    _gameOverData = null;
+    _gameOverAt = 0;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -361,7 +376,7 @@ function interpPlayers(prevArr, currArr, t) {
 // ─────────────────────────────────────────────────────────────
 // 메인 렌더
 // ─────────────────────────────────────────────────────────────
-export function render(prevPlayers, currPlayers, t, myId, now, items = []) {
+export function render(prevPlayers, currPlayers, t, myId, now, items = [], spectateTargetId = null) {
     if (!ctx) return;
 
     // 보간된 플레이어 목록
@@ -385,9 +400,11 @@ export function render(prevPlayers, currPlayers, t, myId, now, items = []) {
         }
     }
 
-    // 카메라 갱신 (내 캐릭터 추적)
+    // 카메라 갱신 (관전 중이면 관전 대상, 아니면 내 캐릭터 추적)
     const me = players.find(p => p.id === myId);
-    if (me) updateCamera(me.x, me.y);
+    const spectateTarget = spectateTargetId ? players.find(p => p.id === spectateTargetId) : null;
+    const cameraTarget = spectateTarget || me;
+    if (cameraTarget) updateCamera(cameraTarget.x, cameraTarget.y);
 
     ctx.clearRect(0, 0, VIEW_W, VIEW_H);
 
@@ -474,11 +491,26 @@ export function render(prevPlayers, currPlayers, t, myId, now, items = []) {
         drawMinimap(players, me, hudScale);
         drawSkillHUD(me, now, hudScale);
         if (_showLeaderboard) Leaderboard.draw(ctx, currPlayers, myId, VIEW_W, hudScale);
+
+        // 관전 모드 HUD
+        if (spectateTarget) {
+            drawSpectateHUD(spectateTarget, currPlayers, hudScale);
+        }
+
+        // 리스폰 카운트다운
+        if (!me.alive && me.respawnAt) {
+            drawRespawnCountdown(me, now);
+        }
     }
     KillFeed.draw(ctx, VIEW_W, VIEW_H);
 
+    // 게임 종료 화면 (최상위 레이어)
+    if (_gameOverData) {
+        drawGameOver(myId, now);
+    }
+
     const isMoving = (animState.get(myId)?.walkUntil ?? 0) > now;
-    if (me && isMoving) drawTargetCursor();
+    if (me && isMoving && !spectateTarget) drawTargetCursor();
 }
 
 function drawTargetCursor() {
@@ -1013,6 +1045,18 @@ function drawSkillHUD(me, now, s) {
     const startX = (VIEW_W - totalW) / 2;
     const startY = VIEW_H - (SLOT_SIZE + 16) * s;
 
+    // 터치 영역 등록 (스크린 좌표)
+    const touchAreas = [];
+    for (let i = 0; i < 3; i++) {
+        touchAreas.push({
+            x: startX + i * (SLOT_SIZE + SLOT_GAP) * s,
+            y: startY,
+            w: SLOT_SIZE * s,
+            h: SLOT_SIZE * s,
+        });
+    }
+    Input.registerSkillAreas(touchAreas);
+
     ctx.save();
     ctx.scale(s, s);
     const sx0 = startX / s;
@@ -1100,6 +1144,175 @@ function drawSkillHUD(me, now, s) {
             ctx.shadowBlur = 0;
         }
     }
+
+    ctx.restore();
+}
+
+// ─────────────────────────────────────────────────────────────
+// 관전 모드 HUD
+// ─────────────────────────────────────────────────────────────
+function drawSpectateHUD(target, allPlayers, s) {
+    const alive = allPlayers.filter(p => p.alive);
+    const idx = alive.findIndex(p => p.id === target.id);
+    const total = alive.length;
+
+    ctx.save();
+
+    // 상단 중앙 — 관전 중 표시
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.beginPath();
+    ctx.roundRect(VIEW_W / 2 - 120, 8, 240, 36, 8);
+    ctx.fill();
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 14px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`👁 관전 중: ${target.name}`, VIEW_W / 2, 26);
+
+    // 좌우 화살표 + 순서
+    ctx.fillStyle = '#aaa';
+    ctx.font = '18px Arial';
+    ctx.fillText('◀', VIEW_W / 2 - 100, 26);
+    ctx.fillText('▶', VIEW_W / 2 + 100, 26);
+
+    ctx.font = '11px Arial';
+    ctx.fillStyle = '#888';
+    ctx.fillText(`${idx + 1} / ${total}`, VIEW_W / 2, 40);
+
+    ctx.restore();
+}
+
+// ─────────────────────────────────────────────────────────────
+// 리스폰 카운트다운
+// ─────────────────────────────────────────────────────────────
+function drawRespawnCountdown(me, now) {
+    if (me.alive || !me.respawnAt) return;
+
+    const remaining = Math.max(0, me.respawnAt - now);
+    const sec = (remaining / 1000).toFixed(1);
+
+    // 어두운 오버레이
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+
+    // 카운트다운 표시
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 48px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowBlur = 20;
+    ctx.shadowColor = '#ff4444';
+    ctx.fillText(sec, VIEW_W / 2, VIEW_H / 2 - 20);
+
+    ctx.font = '18px Arial';
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#ccc';
+    ctx.fillText('부활까지...', VIEW_W / 2, VIEW_H / 2 + 30);
+
+    ctx.restore();
+}
+
+// ─────────────────────────────────────────────────────────────
+// 게임 종료 화면
+// ─────────────────────────────────────────────────────────────
+function drawGameOver(myId, now) {
+    if (!_gameOverData) return;
+
+    const elapsed = now - _gameOverAt;
+    const restartIn = Math.max(0, GAME_RESTART_DELAY_MS - elapsed);
+    const restartSec = (restartIn / 1000).toFixed(1);
+
+    ctx.save();
+
+    // 어두운 오버레이
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+
+    const centerX = VIEW_W / 2;
+    const centerY = VIEW_H / 2;
+
+    // 승자 표시
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    if (_gameOverData.winnerId) {
+        const isWinner = _gameOverData.winnerId === myId;
+        ctx.font = 'bold 36px Arial';
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = isWinner ? '#ffd700' : '#fff';
+        ctx.fillStyle = isWinner ? '#ffd700' : '#fff';
+        ctx.fillText(isWinner ? '🏆 승리!' : '게임 종료', centerX, centerY - 120);
+
+        ctx.font = '20px Arial';
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = '#aaa';
+        ctx.fillText(`우승: ${_gameOverData.winnerName}`, centerX, centerY - 80);
+    } else {
+        ctx.font = 'bold 36px Arial';
+        ctx.fillStyle = '#fff';
+        ctx.fillText('게임 종료', centerX, centerY - 100);
+    }
+
+    // 순위표
+    const rankings = _gameOverData.rankings || [];
+    const top5 = rankings.slice(0, 5);
+    const boxW = 300, boxH = 30 + top5.length * 28;
+    const boxX = centerX - boxW / 2;
+    const boxY = centerY - 40;
+
+    ctx.fillStyle = 'rgba(20,20,40,0.9)';
+    ctx.beginPath();
+    ctx.roundRect(boxX, boxY, boxW, boxH, 8);
+    ctx.fill();
+
+    ctx.strokeStyle = '#555';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // 헤더
+    ctx.font = 'bold 12px Arial';
+    ctx.fillStyle = '#888';
+    ctx.textAlign = 'left';
+    ctx.fillText('순위', boxX + 15, boxY + 18);
+    ctx.fillText('이름', boxX + 60, boxY + 18);
+    ctx.textAlign = 'right';
+    ctx.fillText('킬', boxX + 200, boxY + 18);
+    ctx.fillText('데스', boxX + 250, boxY + 18);
+
+    // 순위 목록
+    ctx.font = '13px Arial';
+    for (let i = 0; i < top5.length; i++) {
+        const p = top5[i];
+        const y = boxY + 42 + i * 28;
+        const isMe = p.id === myId;
+
+        if (isMe) {
+            ctx.fillStyle = 'rgba(79,195,247,0.2)';
+            ctx.fillRect(boxX + 5, y - 12, boxW - 10, 26);
+        }
+
+        ctx.textAlign = 'left';
+        ctx.fillStyle = p.rank === 1 ? '#ffd700' : p.rank === 2 ? '#c0c0c0' : p.rank === 3 ? '#cd7f32' : '#fff';
+        ctx.fillText(`${p.rank}`, boxX + 20, y);
+
+        ctx.fillStyle = isMe ? '#4fc3f7' : '#fff';
+        ctx.fillText(p.name.slice(0, 10), boxX + 60, y);
+
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#4caf50';
+        ctx.fillText(`${p.kills}`, boxX + 200, y);
+
+        ctx.fillStyle = '#f44336';
+        ctx.fillText(`${p.deaths}`, boxX + 250, y);
+    }
+
+    // 재시작 카운트다운
+    ctx.textAlign = 'center';
+    ctx.font = '16px Arial';
+    ctx.fillStyle = '#ffd54f';
+    ctx.fillText(`${restartSec}초 후 재시작...`, centerX, boxY + boxH + 30);
 
     ctx.restore();
 }

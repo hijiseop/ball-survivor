@@ -16,6 +16,14 @@ export const ATTACK_DURATION = 360;        // 공격 모션 지속 (ms)
 export const ATTACK_RANGE = 33;            // 공격 히트 범위 (px, 히트박스 모서리 기준)
 export const INVINCIBLE_MS = 1500;         // 피격 후 무적 시간
 
+// 리스폰
+export const RESPAWN_DELAY_MS = 3000;      // 사망 후 부활 대기 (ms)
+export const RESPAWN_INVINCIBLE_MS = 2000; // 부활 후 무적 시간 (ms)
+
+// 게임 종료
+export const GAME_RESTART_DELAY_MS = 5000; // 게임 종료 후 재시작 대기 (ms)
+export const MIN_PLAYERS_FOR_GAME = 2;     // 게임 종료 판정 최소 인원
+
 // 히트박스 (캐릭터 중심 기준 오프셋)
 export const HIT_W = 30;
 export const HIT_H = 48;

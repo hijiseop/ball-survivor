@@ -10,7 +10,8 @@ export function connect() {
     _socket = io();
 
     for (const evt of ['welcome', 'state', 'hit', 'kill', 'playerJoin', 'playerLeave', 'disconnect', 'roomFull',
-                       'itemSpawn', 'itemPickup', 'itemExpire', 'skillEffect', 'legendaryDrop']) {
+                       'itemSpawn', 'itemPickup', 'itemExpire', 'skillEffect', 'legendaryDrop', 'respawn',
+                       'gameOver', 'gameRestart']) {
         _socket.on(evt, data => _handlers[evt]?.(data));
     }
 }

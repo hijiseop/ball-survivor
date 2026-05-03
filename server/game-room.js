@@ -7,6 +7,7 @@ import {
     MAX_ITEMS, ITEM_SPAWN_INTERVAL, ITEM_EXPIRE_MS, ITEM_PICKUP_RANGE,
     ITEM_PROB_LV1, ITEM_PROB_LV2, ITEM_PROB_LV3, ITEM_PROB_LV4,
     WORLD_W, WORLD_H, SKILL_MOTION_MS,
+    GAME_RESTART_DELAY_MS, MIN_PLAYERS_FOR_GAME,
 } from '../shared/constants.js';
 import { Player } from './player.js';
 
@@ -24,6 +25,9 @@ export class GameRoom {
         this.tickCount = 0;
         this._interval = null;
         this._lastItemSpawn = 0;
+        this._gameStartedAt = Date.now();
+        this._gameOverAt = 0;
+        this._isGameOver = false;
     }
 
     start() {
@@ -79,6 +83,17 @@ export class GameRoom {
         console.log(`- leave: ${player.name} (${id}) | total: ${this.players.size}`);
     }
 
+    // ── 이벤트 헬퍼 ──────────────────────────────────────────────
+    _emitHit(attacker, target, damage) {
+        this.io.emit('hit', { attackerId: attacker.id, targetId: target.id, damage, targetHp: target.hp });
+    }
+
+    _emitKill(killer, victim, now) {
+        victim.die(now);
+        killer.kills++;
+        this.io.emit('kill', { killerId: killer.id, killerName: killer.name, victimId: victim.id, victimName: victim.name });
+    }
+
     // 클라이언트 입력 반영
     setInput(id, targetX, targetY) {
         const player = this.players.get(id);
@@ -108,14 +123,14 @@ export class GameRoom {
             case 'explosion': {
                 const { hits, reflects } = applyExplosion(player, allPlayers, slot.level, now);
                 for (const h of hits) {
-                    this.io.emit('hit', { attackerId: player.id, targetId: h.target.id, damage: h.damage, targetHp: h.target.hp });
-                    if (h.died) { h.target.alive = false; player.kills++; this.io.emit('kill', { killerId: player.id, killerName: player.name, victimId: h.target.id, victimName: h.target.name }); }
+                    this._emitHit(player, h.target, h.damage);
+                    if (h.died) this._emitKill(player, h.target, now);
                 }
                 for (const r of reflects) {
                     const rr = applyDamage(player, r.damage, now);
                     if (rr.applied) {
-                        this.io.emit('hit', { attackerId: r.target.id, targetId: player.id, damage: r.damage, targetHp: player.hp });
-                        if (rr.died) { player.alive = false; r.target.kills++; this.io.emit('kill', { killerId: r.target.id, killerName: r.target.name, victimId: player.id, victimName: player.name }); }
+                        this._emitHit(r.target, player, r.damage);
+                        if (rr.died) this._emitKill(r.target, player, now);
                     }
                 }
                 this.io.emit('skillEffect', { playerId: player.id, skillType: 'explosion', level: slot.level, x: player.x, y: player.y });
@@ -141,15 +156,15 @@ export class GameRoom {
                             const reflectDmg = Math.max(1, Math.round(dmg * target.shieldReflect));
                             const rr = applyDamage(player, reflectDmg, now);
                             if (rr.applied) {
-                                this.io.emit('hit', { attackerId: target.id, targetId: player.id, damage: reflectDmg, targetHp: player.hp });
-                                if (rr.died) { player.alive = false; target.kills++; this.io.emit('kill', { killerId: target.id, killerName: target.name, victimId: player.id, victimName: player.name }); }
+                                this._emitHit(target, player, reflectDmg);
+                                if (rr.died) this._emitKill(target, player, now);
                             }
                             continue;
                         }
                         const r = applyDamage(target, dmg, now);
                         if (r.applied) {
-                            this.io.emit('hit', { attackerId: player.id, targetId: target.id, damage: dmg, targetHp: target.hp });
-                            if (r.died) { target.alive = false; player.kills++; this.io.emit('kill', { killerId: player.id, killerName: player.name, victimId: target.id, victimName: target.name }); }
+                            this._emitHit(player, target, dmg);
+                            if (r.died) this._emitKill(player, target, now);
                         }
                     }
                 }
@@ -319,6 +334,14 @@ export class GameRoom {
         for (const it of expired) this.io.emit('itemExpire', { itemId: it.id });
         this.items = this.items.filter(it => now < it.expiresAt);
 
+        // 리스폰 처리
+        for (const player of this.players.values()) {
+            if (!player.alive && player.respawnAt > 0 && now >= player.respawnAt) {
+                player.respawn(now);
+                this.io.emit('respawn', { playerId: player.id, x: player.x, y: player.y });
+            }
+        }
+
         // 아이템 픽업 감지
         for (const player of this.players.values()) {
             if (!player.alive) continue;
@@ -354,41 +377,30 @@ export class GameRoom {
                 if (target.id === player.id || !target.alive) continue;
 
                 if (checkAttackHit(player, target)) {
-                    const diff = player.level - target.level;
-                    const modifier = diff >= 5
-                        ? 1.2
-                        : diff >= 0
-                        ? 1 + diff * 0.04
-                        : Math.max(0.6, 1 + diff * 0.01);
-                    const finalDamage = Math.max(1, Math.round(player.damage * modifier));
+                    const finalDamage = Math.max(1, Math.round(player.damage * levelModifier(player.level, target.level)));
 
                     // 방어막 반사
                     if (now < target.shieldUntil) {
                         const reflectDmg = Math.max(1, Math.round(finalDamage * target.shieldReflect));
                         const rr = applyDamage(player, reflectDmg, now);
                         if (rr.applied) {
-                            this.io.emit('hit', { attackerId: target.id, targetId: player.id, damage: reflectDmg, targetHp: player.hp });
-                            if (rr.died) {
-                                player.alive = false;
-                                target.kills++;
-                                this.io.emit('kill', { killerId: target.id, killerName: target.name, victimId: player.id, victimName: player.name });
-                            }
+                            this._emitHit(target, player, reflectDmg);
+                            if (rr.died) this._emitKill(target, player, now);
                         }
                         continue;
                     }
 
                     const result = applyDamage(target, finalDamage, now);
                     if (result.applied) {
-                        this.io.emit('hit', { attackerId: player.id, targetId: target.id, damage: finalDamage, targetHp: target.hp });
-                        if (result.died) {
-                            target.alive = false;
-                            player.kills++;
-                            this.io.emit('kill', { killerId: player.id, killerName: player.name, victimId: target.id, victimName: target.name });
-                        }
+                        this._emitHit(player, target, finalDamage);
+                        if (result.died) this._emitKill(player, target, now);
                     }
                 }
             }
         }
+
+        // 게임 종료 체크
+        this._checkGameOver(now);
 
         // 상태 브로드캐스트 — 본인은 풀 스냅샷, 상대는 peer 스냅샷
         const fullMap  = new Map([...this.players.values()].map(p => [p.id, p.toSnapshot()]));
@@ -404,5 +416,74 @@ export class GameRoom {
                 items: itemsData,
             });
         }
+    }
+
+    // ── 게임 종료 체크 ───────────────────────────────────────────
+    _checkGameOver(now) {
+        // 이미 게임 오버 상태면 재시작 타이머 체크
+        if (this._isGameOver) {
+            if (now >= this._gameOverAt + GAME_RESTART_DELAY_MS) {
+                this._restartGame(now);
+            }
+            return;
+        }
+
+        // 최소 인원 미달이면 게임 종료 안 함
+        if (this.players.size < MIN_PLAYERS_FOR_GAME) return;
+
+        const alivePlayers = [...this.players.values()].filter(p => p.alive);
+        if (alivePlayers.length > 1) return;
+
+        // 게임 종료!
+        this._isGameOver = true;
+        this._gameOverAt = now;
+
+        const winner = alivePlayers[0] || null;
+        const gameDuration = now - this._gameStartedAt;
+
+        // 순위 계산 (킬 → 생존시간 → 레벨)
+        const rankings = [...this.players.values()]
+            .map(p => ({
+                id: p.id,
+                name: p.name,
+                kills: p.kills,
+                deaths: p.deaths,
+                alive: p.alive,
+                level: p.level,
+            }))
+            .sort((a, b) => {
+                if (a.alive !== b.alive) return a.alive ? -1 : 1;
+                if (a.kills !== b.kills) return b.kills - a.kills;
+                return b.level - a.level;
+            })
+            .map((p, i) => ({ ...p, rank: i + 1 }));
+
+        this.io.emit('gameOver', {
+            winnerId: winner?.id ?? null,
+            winnerName: winner?.name ?? null,
+            rankings,
+            gameDuration,
+            restartIn: GAME_RESTART_DELAY_MS,
+        });
+
+        console.log(`🏆 Game Over! Winner: ${winner?.name ?? 'none'}`);
+    }
+
+    _restartGame(now) {
+        this._isGameOver = false;
+        this._gameOverAt = 0;
+        this._gameStartedAt = now;
+        this.items = [];
+        this._lastItemSpawn = 0;
+
+        // 모든 플레이어 리스폰
+        for (const player of this.players.values()) {
+            player.respawn(now);
+            player.kills = 0;
+            player.deaths = 0;
+        }
+
+        this.io.emit('gameRestart');
+        console.log('🔄 Game Restarted');
     }
 }
