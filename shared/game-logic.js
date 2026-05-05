@@ -2,8 +2,84 @@ import {
     CHAR_SPEED, STOP_DIST, WORLD_W, WORLD_H,
     HIT_W, HIT_H, HIT_OFFSET_X, HIT_OFFSET_Y,
     ATTACK_RANGE, INVINCIBLE_MS,
-    SKILL_STATS,
+    SKILL_STATS, MAP_OBSTACLES,
 } from './constants.js';
+
+function clampPosition(player) {
+    player.x = Math.max(0, Math.min(player.x, WORLD_W));
+    player.y = Math.max(0, Math.min(player.y, WORLD_H));
+}
+
+function playerBoundsAt(x, y) {
+    const cx = x + HIT_OFFSET_X;
+    const cy = y + HIT_OFFSET_Y;
+    return {
+        x: cx - HIT_W / 2,
+        y: cy - HIT_H / 2,
+        w: HIT_W,
+        h: HIT_H,
+    };
+}
+
+function rectsOverlap(a, b) {
+    return a.x < b.x + b.w &&
+        a.x + a.w > b.x &&
+        a.y < b.y + b.h &&
+        a.y + a.h > b.y;
+}
+
+export function isBlockedPosition(x, y, obstacles = MAP_OBSTACLES) {
+    const bounds = playerBoundsAt(x, y);
+    return obstacles.some(ob => rectsOverlap(bounds, ob));
+}
+
+export function randomOpenPosition(margin = 50) {
+    for (let i = 0; i < 80; i++) {
+        const x = Math.random() * (WORLD_W - margin * 2) + margin;
+        const y = Math.random() * (WORLD_H - margin * 2) + margin;
+        if (!isBlockedPosition(x, y)) return { x, y };
+    }
+    return { x: margin, y: margin };
+}
+
+function moveWithObstacleSlide(player, moveX, moveY) {
+    const segments = Math.max(1, Math.ceil(Math.max(Math.abs(moveX), Math.abs(moveY)) / (HIT_W / 2)));
+    const stepX = moveX / segments;
+    const stepY = moveY / segments;
+    let moved = false;
+
+    for (let i = 0; i < segments; i++) {
+        if (!moveOneStepWithObstacleSlide(player, stepX, stepY)) break;
+        moved = true;
+    }
+
+    return moved;
+}
+
+function moveOneStepWithObstacleSlide(player, moveX, moveY) {
+    const startX = player.x;
+    const startY = player.y;
+    let movedX = false;
+    let movedY = false;
+
+    player.x = startX + moveX;
+    clampPosition(player);
+    if (isBlockedPosition(player.x, startY)) {
+        player.x = startX;
+    } else {
+        movedX = Math.abs(player.x - startX) > 0.001;
+    }
+
+    player.y = startY + moveY;
+    clampPosition(player);
+    if (isBlockedPosition(player.x, player.y)) {
+        player.y = startY;
+    } else {
+        movedY = Math.abs(player.y - startY) > 0.001;
+    }
+
+    return movedX || movedY;
+}
 
 /**
  * 플레이어 위치 업데이트
@@ -20,15 +96,10 @@ export function updatePosition(player, dt) {
 
     const step = CHAR_SPEED * dt;
     const move = Math.min(step, dist);
-    player.x += (dx / dist) * move;
-    player.y += (dy / dist) * move;
-
-    // 맵 경계 클램프
-    player.x = Math.max(0, Math.min(player.x, WORLD_W));
-    player.y = Math.max(0, Math.min(player.y, WORLD_H));
+    const moved = moveWithObstacleSlide(player, (dx / dist) * move, (dy / dist) * move);
 
     return {
-        moved: true,
+        moved,
         facingRight: dx > 5 ? true : dx < -5 ? false : undefined,
     };
 }
@@ -140,12 +211,12 @@ export function applyDash(player, level) {
     const len = Math.sqrt(dx * dx + dy * dy);
 
     if (len > 1) {
-        player.x = Math.max(0, Math.min(WORLD_W, player.x + (dx / len) * dist));
-        player.y = Math.max(0, Math.min(WORLD_H, player.y + (dy / len) * dist));
+        const stepX = (dx / len) * dist;
+        const stepY = (dy / len) * dist;
+        moveWithObstacleSlide(player, stepX, stepY);
     } else {
-        // 정지 상태면 바라보는 방향으로
         const dir = player.facingRight ? 1 : -1;
-        player.x = Math.max(0, Math.min(WORLD_W, player.x + dir * dist));
+        moveWithObstacleSlide(player, dir * dist, 0);
     }
     player.targetX = player.x;
     player.targetY = player.y;

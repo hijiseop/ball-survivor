@@ -1,33 +1,35 @@
-import { updatePosition, checkAttackHit, applyDamage, applyExplosion, applyShield, applyDash, applyHeal, levelModifier } from '../shared/game-logic.js';
+import { updatePosition, checkAttackHit, applyDamage, applyExplosion, applyShield, applyDash, applyHeal, levelModifier, randomOpenPosition } from '../shared/game-logic.js';
+import { rollItemGrade, rollItemReward } from '../shared/item-system.js';
 import {
     SERVER_TICK_MS, SERVER_TICK_RATE,
     ATTACK_INTERVAL, ATTACK_DURATION,
     GRID_CELL_SIZE, MAX_PLAYERS,
     SKILL_TYPES, SKILL_STATS,
     MAX_ITEMS, ITEM_SPAWN_INTERVAL, ITEM_EXPIRE_MS, ITEM_PICKUP_RANGE,
-    ITEM_PROB_LV1, ITEM_PROB_LV2, ITEM_PROB_LV3, ITEM_PROB_LV4,
-    WORLD_W, WORLD_H, SKILL_MOTION_MS,
-    GAME_RESTART_DELAY_MS, MIN_PLAYERS_FOR_GAME,
+    SKILL_MOTION_MS,
+    SAFE_ZONE_RADIUS, SAFE_ZONE_DURATION_MIN, SAFE_ZONE_DURATION_MAX,
+    SAFE_ZONE_SPAWN_INTERVAL, MAX_SAFE_ZONES, SAFE_ZONE_CORNERS,
 } from '../shared/constants.js';
 import { Player } from './player.js';
 
 let _itemIdCounter = 0;
+let _safeZoneIdCounter = 0;
 
 // 디버그 플래그 — .env 또는 실행 환경에서 설정 (shared/에 두지 않음)
 const DEBUG_ITEM_LEVEL   = process.env.DEBUG_ITEM_LEVEL   ? parseInt(process.env.DEBUG_ITEM_LEVEL)        : null;
 const DEBUG_START_SKILLS = process.env.DEBUG_START_SKILLS === 'true';
+const ITEM_PICKUP_RETRY_MS = 800;
 
 export class GameRoom {
     constructor(io) {
         this.io = io;
         this.players = new Map(); // socketId → Player
         this.items    = [];       // { id, x, y, spawnedAt, expiresAt }
+        this.safeZones = [];      // { id, x, y, expiresAt }
         this.tickCount = 0;
         this._interval = null;
         this._lastItemSpawn = 0;
-        this._gameStartedAt = Date.now();
-        this._gameOverAt = 0;
-        this._isGameOver = false;
+        this._lastSafeZoneSpawn = 0;
     }
 
     start() {
@@ -89,9 +91,34 @@ export class GameRoom {
     }
 
     _emitKill(killer, victim, now) {
+        // 킬 드롭: 피해자 스킬 레벨 총합 기준
+        this._dropItemOnKill(victim, now);
         victim.die(now);
         killer.kills++;
         this.io.emit('kill', { killerId: killer.id, killerName: killer.name, victimId: victim.id, victimName: victim.name });
+    }
+
+    _dropItemOnKill(victim, now) {
+        const totalLv = victim.skills.reduce((sum, s) => sum + (s?.level ?? 0), 0);
+        if (totalLv === 0) return;
+
+        let grade;
+        if (totalLv >= 10) grade = 'legendary';
+        else if (totalLv >= 7) grade = 'risky';
+        else if (totalLv >= 4) grade = 'rare';
+        else grade = 'normal';
+
+        const id = ++_itemIdCounter;
+        const item = {
+            id,
+            x: victim.x,
+            y: victim.y,
+            grade,
+            spawnedAt: now,
+            expiresAt: now + ITEM_EXPIRE_MS,
+        };
+        this.items.push(item);
+        this.io.emit('itemSpawn', { id: item.id, x: item.x, y: item.y, grade: item.grade, expiresAt: item.expiresAt });
     }
 
     // 클라이언트 입력 반영
@@ -117,20 +144,25 @@ export class GameRoom {
         player.skillUntil   = now + SKILL_MOTION_MS;
         player.skillType    = slot.type;
 
+        // 안전지대 내에서는 공격 스킬 무효
+        const inSafeZone = this._isInSafeZone(player);
         const allPlayers = [...this.players.values()];
 
         switch (slot.type) {
             case 'explosion': {
-                const { hits, reflects } = applyExplosion(player, allPlayers, slot.level, now);
-                for (const h of hits) {
-                    this._emitHit(player, h.target, h.damage);
-                    if (h.died) this._emitKill(player, h.target, now);
-                }
-                for (const r of reflects) {
-                    const rr = applyDamage(player, r.damage, now);
-                    if (rr.applied) {
-                        this._emitHit(r.target, player, r.damage);
-                        if (rr.died) this._emitKill(r.target, player, now);
+                if (!inSafeZone) {
+                    const targets = allPlayers.filter(p => !this._isInSafeZone(p));
+                    const { hits, reflects } = applyExplosion(player, targets, slot.level, now);
+                    for (const h of hits) {
+                        this._emitHit(player, h.target, h.damage);
+                        if (h.died) this._emitKill(player, h.target, now);
+                    }
+                    for (const r of reflects) {
+                        const rr = applyDamage(player, r.damage, now);
+                        if (rr.applied) {
+                            this._emitHit(r.target, player, r.damage);
+                            if (rr.died) this._emitKill(r.target, player, now);
+                        }
                     }
                 }
                 this.io.emit('skillEffect', { playerId: player.id, skillType: 'explosion', level: slot.level, x: player.x, y: player.y });
@@ -144,10 +176,11 @@ export class GameRoom {
             case 'dash': {
                 const { aoeRange, dmgMult } = applyDash(player, slot.level);
                 this.io.emit('skillEffect', { playerId: player.id, skillType: 'dash', level: slot.level, x: player.x, y: player.y });
-                // Lv2+ 도착지 AoE
-                if (aoeRange > 0) {
+                // Lv2+ 도착지 AoE (안전지대 내 무효)
+                if (aoeRange > 0 && !this._isInSafeZone(player)) {
                     for (const target of allPlayers) {
                         if (target.id === player.id || !target.alive) continue;
+                        if (this._isInSafeZone(target)) continue;
                         const dx = target.x - player.x;
                         const dy = target.y - player.y;
                         if (dx * dx + dy * dy > aoeRange * aoeRange) continue;
@@ -182,47 +215,34 @@ export class GameRoom {
     _spawnItem(now) {
         if (this.items.length >= MAX_ITEMS) return;
         const id = ++_itemIdCounter;
+        const spawn = randomOpenPosition();
         const item = {
             id,
-            x: Math.random() * (WORLD_W - 100) + 50,
-            y: Math.random() * (WORLD_H - 100) + 50,
+            x: spawn.x,
+            y: spawn.y,
+            grade: rollItemGrade(),
             spawnedAt: now,
             expiresAt: now + ITEM_EXPIRE_MS,
         };
         this.items.push(item);
-        this.io.emit('itemSpawn', { id: item.id, x: item.x, y: item.y, expiresAt: item.expiresAt });
+        this.io.emit('itemSpawn', { id: item.id, x: item.x, y: item.y, grade: item.grade, expiresAt: item.expiresAt });
     }
 
     // ── 아이템 획득 결과 결정 ────────────────────────────────────
-    _rollItem(player) {
-        const randType = () => SKILL_TYPES[Math.floor(Math.random() * SKILL_TYPES.length)];
-
-        // 디버그: 레벨 고정
-        if (DEBUG_ITEM_LEVEL !== null) {
-            return { level: DEBUG_ITEM_LEVEL, type: randType() };
-        }
-
-        // Lv4 체크 (Lv3 보유자만)
-        if (player.hasLv3Skill() && Math.random() < ITEM_PROB_LV4) {
-            return { level: 4, type: randType() };
-        }
-        const r = Math.random();
-        if (r < ITEM_PROB_LV1) return { level: 1, type: randType() };
-        if (r < ITEM_PROB_LV2) return { level: 2, type: randType() };
-        if (r < ITEM_PROB_LV3) return { level: 3, type: randType() };
-        return { curse: true };
+    _rollItem(player, item) {
+        return rollItemReward(player, item.grade, { debugLevel: DEBUG_ITEM_LEVEL });
     }
 
     // ── 아이템 획득 처리 ─────────────────────────────────────────
     _pickupItem(player, item) {
-        const result = this._rollItem(player);
+        const result = this._rollItem(player, item);
 
         if (result.curse) {
             // 저주: 보유 스킬 중 랜덤 대상
             const owned = player.skills.map((s, i) => s ? i : -1).filter(i => i >= 0);
             if (owned.length === 0) {
-                this.io.to(player.id).emit('itemPickup', { itemId: item.id, result: { curse: true, effect: 'none' } });
-                return;
+                this.io.to(player.id).emit('itemPickup', { itemId: item.id, consumed: true, result: { curse: true, grade: item.grade, effect: 'none' } });
+                return { consumed: true };
             }
             const targetIdx = owned[Math.floor(Math.random() * owned.length)];
             const roll = Math.random();
@@ -242,8 +262,8 @@ export class GameRoom {
                     player.skills[targetIdx].level--;
                 }
             }
-            this.io.to(player.id).emit('itemPickup', { itemId: item.id, result: { curse: true, effect, ...slotInfo } });
-            return;
+            this.io.to(player.id).emit('itemPickup', { itemId: item.id, consumed: true, result: { curse: true, grade: item.grade, effect, ...slotInfo } });
+            return { consumed: true };
         }
 
         const { level, type } = result;
@@ -253,38 +273,41 @@ export class GameRoom {
         if (sameIdx >= 0) {
             if (level > player.skills[sameIdx].level) {
                 player.skills[sameIdx].level = level;
-                this._emitPickup(player, item.id, level, type, sameIdx);
+                this._emitPickup(player, item.id, level, type, sameIdx, item.grade);
             } else {
-                // 무시 (더 높은 레벨 유지)
-                this.io.to(player.id).emit('itemPickup', { itemId: item.id, result: { ignored: true } });
+                // 업그레이드 안 됨 — 조용히 소비
+                this.io.to(player.id).emit('itemPickup', { itemId: item.id, consumed: true, result: { noEffect: true } });
             }
-            return;
+            return { consumed: true };
         }
 
         // 빈 슬롯 찾기
         const emptyIdx = player.skills.findIndex(s => s === null);
         if (emptyIdx >= 0) {
             player.skills[emptyIdx] = { type, level, cooldownUntil: 0 };
-            this._emitPickup(player, item.id, level, type, emptyIdx);
-            return;
+            this._emitPickup(player, item.id, level, type, emptyIdx, item.grade);
+            return { consumed: true };
         }
 
         // 꽉 참 → Lv4 제외 랜덤 교체
         const candidates = player.skills.map((s, i) => (s && s.level < 4) ? i : -1).filter(i => i >= 0);
         if (candidates.length === 0) {
-            this.io.to(player.id).emit('itemPickup', { itemId: item.id, result: { ignored: true } });
-            return;
+            // 모든 슬롯 Lv4면 그냥 소비 (상대에게 안 줌)
+            this.io.to(player.id).emit('itemPickup', { itemId: item.id, consumed: true, result: { level, type, grade: item.grade, noEffect: true } });
+            return { consumed: true };
         }
         const replaceIdx = candidates[Math.floor(Math.random() * candidates.length)];
         player.skills[replaceIdx] = { type, level, cooldownUntil: 0 };
-        this._emitPickup(player, item.id, level, type, replaceIdx);
+        this._emitPickup(player, item.id, level, type, replaceIdx, item.grade);
+        return { consumed: true };
     }
 
-    _emitPickup(player, itemId, level, type, slotIndex) {
+    _emitPickup(player, itemId, level, type, slotIndex, grade = undefined) {
         const isLegendary = level === 4;
         this.io.to(player.id).emit('itemPickup', {
             itemId,
-            result: { level, type, slotIndex, legendary: isLegendary },
+            consumed: true,
+            result: { level, type, slotIndex, grade, legendary: isLegendary },
         });
         if (isLegendary) {
             this.io.emit('legendaryDrop', { playerId: player.id, playerName: player.name, skillType: type });
@@ -334,6 +357,17 @@ export class GameRoom {
         for (const it of expired) this.io.emit('itemExpire', { itemId: it.id });
         this.items = this.items.filter(it => now < it.expiresAt);
 
+        // 안전지대 스폰
+        if (now - this._lastSafeZoneSpawn >= SAFE_ZONE_SPAWN_INTERVAL) {
+            this._lastSafeZoneSpawn = now;
+            this._spawnSafeZone(now);
+        }
+
+        // 안전지대 만료
+        const expiredZones = this.safeZones.filter(z => now >= z.expiresAt);
+        for (const z of expiredZones) this.io.emit('safeZoneExpire', { zoneId: z.id });
+        this.safeZones = this.safeZones.filter(z => now < z.expiresAt);
+
         // 리스폰 처리
         for (const player of this.players.values()) {
             if (!player.alive && player.respawnAt > 0 && now >= player.respawnAt) {
@@ -347,11 +381,17 @@ export class GameRoom {
             if (!player.alive) continue;
             for (let i = this.items.length - 1; i >= 0; i--) {
                 const item = this.items[i];
+                if (item.pickupBlockedUntil?.get(player.id) > now) continue;
                 const dx = player.x - item.x;
                 const dy = player.y - item.y;
                 if (dx * dx + dy * dy <= ITEM_PICKUP_RANGE * ITEM_PICKUP_RANGE) {
-                    this.items.splice(i, 1);
-                    this._pickupItem(player, item);
+                    const { consumed } = this._pickupItem(player, item);
+                    if (consumed) {
+                        this.items.splice(i, 1);
+                    } else {
+                        item.pickupBlockedUntil ??= new Map();
+                        item.pickupBlockedUntil.set(player.id, now + ITEM_PICKUP_RETRY_MS);
+                    }
                     break;
                 }
             }
@@ -375,6 +415,8 @@ export class GameRoom {
 
             for (const target of this._getNeighbors(grid, player)) {
                 if (target.id === player.id || !target.alive) continue;
+                // 안전지대 내 공격 불가
+                if (this._isInSafeZone(player) || this._isInSafeZone(target)) continue;
 
                 if (checkAttackHit(player, target)) {
                     const finalDamage = Math.max(1, Math.round(player.damage * levelModifier(player.level, target.level)));
@@ -399,13 +441,11 @@ export class GameRoom {
             }
         }
 
-        // 게임 종료 체크
-        this._checkGameOver(now);
-
         // 상태 브로드캐스트 — 본인은 풀 스냅샷, 상대는 peer 스냅샷
         const fullMap  = new Map([...this.players.values()].map(p => [p.id, p.toSnapshot()]));
         const peerList = [...this.players.values()].map(p => p.toPeerSnapshot());
-        const itemsData = this.items.map(it => ({ id: it.id, x: it.x, y: it.y, expiresAt: it.expiresAt }));
+        const itemsData = this.items.map(it => ({ id: it.id, x: it.x, y: it.y, grade: it.grade, expiresAt: it.expiresAt }));
+        const zonesData = this.safeZones.map(z => ({ id: z.id, x: z.x, y: z.y, expiresAt: z.expiresAt }));
 
         for (const pid of this.players.keys()) {
             const myFull = fullMap.get(pid);
@@ -414,76 +454,33 @@ export class GameRoom {
                 tick: this.tickCount,
                 players: [myFull, ...others],
                 items: itemsData,
+                safeZones: zonesData,
             });
         }
     }
 
-    // ── 게임 종료 체크 ───────────────────────────────────────────
-    _checkGameOver(now) {
-        // 이미 게임 오버 상태면 재시작 타이머 체크
-        if (this._isGameOver) {
-            if (now >= this._gameOverAt + GAME_RESTART_DELAY_MS) {
-                this._restartGame(now);
-            }
-            return;
-        }
-
-        // 최소 인원 미달이면 게임 종료 안 함
-        if (this.players.size < MIN_PLAYERS_FOR_GAME) return;
-
-        const alivePlayers = [...this.players.values()].filter(p => p.alive);
-        if (alivePlayers.length > 1) return;
-
-        // 게임 종료!
-        this._isGameOver = true;
-        this._gameOverAt = now;
-
-        const winner = alivePlayers[0] || null;
-        const gameDuration = now - this._gameStartedAt;
-
-        // 순위 계산 (킬 → 생존시간 → 레벨)
-        const rankings = [...this.players.values()]
-            .map(p => ({
-                id: p.id,
-                name: p.name,
-                kills: p.kills,
-                deaths: p.deaths,
-                alive: p.alive,
-                level: p.level,
-            }))
-            .sort((a, b) => {
-                if (a.alive !== b.alive) return a.alive ? -1 : 1;
-                if (a.kills !== b.kills) return b.kills - a.kills;
-                return b.level - a.level;
-            })
-            .map((p, i) => ({ ...p, rank: i + 1 }));
-
-        this.io.emit('gameOver', {
-            winnerId: winner?.id ?? null,
-            winnerName: winner?.name ?? null,
-            rankings,
-            gameDuration,
-            restartIn: GAME_RESTART_DELAY_MS,
-        });
-
-        console.log(`🏆 Game Over! Winner: ${winner?.name ?? 'none'}`);
+    // ── 안전지대 ─────────────────────────────────────────────────
+    _spawnSafeZone(now) {
+        if (this.safeZones.length >= MAX_SAFE_ZONES) return;
+        const id = ++_safeZoneIdCounter;
+        const corner = SAFE_ZONE_CORNERS[Math.floor(Math.random() * SAFE_ZONE_CORNERS.length)];
+        const duration = SAFE_ZONE_DURATION_MIN + Math.random() * (SAFE_ZONE_DURATION_MAX - SAFE_ZONE_DURATION_MIN);
+        const zone = {
+            id,
+            x: corner.x,
+            y: corner.y,
+            expiresAt: now + duration,
+        };
+        this.safeZones.push(zone);
+        this.io.emit('safeZoneSpawn', { id: zone.id, x: zone.x, y: zone.y, expiresAt: zone.expiresAt });
     }
 
-    _restartGame(now) {
-        this._isGameOver = false;
-        this._gameOverAt = 0;
-        this._gameStartedAt = now;
-        this.items = [];
-        this._lastItemSpawn = 0;
-
-        // 모든 플레이어 리스폰
-        for (const player of this.players.values()) {
-            player.respawn(now);
-            player.kills = 0;
-            player.deaths = 0;
+    _isInSafeZone(player) {
+        for (const z of this.safeZones) {
+            const dx = player.x - z.x;
+            const dy = player.y - z.y;
+            if (dx * dx + dy * dy <= SAFE_ZONE_RADIUS * SAFE_ZONE_RADIUS) return true;
         }
-
-        this.io.emit('gameRestart');
-        console.log('🔄 Game Restarted');
+        return false;
     }
 }

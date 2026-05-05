@@ -11,7 +11,7 @@ export function connect() {
 
     for (const evt of ['welcome', 'state', 'hit', 'kill', 'playerJoin', 'playerLeave', 'disconnect', 'roomFull',
                        'itemSpawn', 'itemPickup', 'itemExpire', 'skillEffect', 'legendaryDrop', 'respawn',
-                       'gameOver', 'gameRestart']) {
+                       'safeZoneSpawn', 'safeZoneExpire']) {
         _socket.on(evt, data => _handlers[evt]?.(data));
     }
 }

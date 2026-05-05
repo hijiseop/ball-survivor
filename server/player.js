@@ -1,11 +1,13 @@
-import { WORLD_W, WORLD_H, MAX_SKILL_SLOTS, RESPAWN_DELAY_MS, RESPAWN_INVINCIBLE_MS } from '../shared/constants.js';
+import { MAX_SKILL_SLOTS, RESPAWN_DELAY_MS, RESPAWN_INVINCIBLE_MS } from '../shared/constants.js';
+import { randomOpenPosition } from '../shared/game-logic.js';
 
 export class Player {
     constructor(id, name, characterLevel, combatPower, characterImageUrl, combatPowerRaw = 0, bossDmg = 0, critDmg = 0) {
         this.id = id;
         this.name = name;
-        this.x = Math.random() * (WORLD_W - 100) + 50;
-        this.y = Math.random() * (WORLD_H - 100) + 50;
+        const spawn = randomOpenPosition();
+        this.x = spawn.x;
+        this.y = spawn.y;
         this.targetX = this.x;
         this.targetY = this.y;
         this.level = characterLevel || 1;
@@ -46,8 +48,9 @@ export class Player {
     }
 
     respawn(now) {
-        this.x = Math.random() * (WORLD_W - 100) + 50;
-        this.y = Math.random() * (WORLD_H - 100) + 50;
+        const spawn = randomOpenPosition();
+        this.x = spawn.x;
+        this.y = spawn.y;
         this.targetX = this.x;
         this.targetY = this.y;
         this.hp = this.maxHp;

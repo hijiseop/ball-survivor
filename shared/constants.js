@@ -20,9 +20,18 @@ export const INVINCIBLE_MS = 1500;         // 피격 후 무적 시간
 export const RESPAWN_DELAY_MS = 3000;      // 사망 후 부활 대기 (ms)
 export const RESPAWN_INVINCIBLE_MS = 2000; // 부활 후 무적 시간 (ms)
 
-// 게임 종료
-export const GAME_RESTART_DELAY_MS = 5000; // 게임 종료 후 재시작 대기 (ms)
-export const MIN_PLAYERS_FOR_GAME = 2;     // 게임 종료 판정 최소 인원
+// 안전지대
+export const SAFE_ZONE_RADIUS = 50;            // px (작은 크기)
+export const SAFE_ZONE_DURATION_MIN = 8000;    // 최소 지속 (ms)
+export const SAFE_ZONE_DURATION_MAX = 15000;   // 최대 지속 (ms)
+export const SAFE_ZONE_SPAWN_INTERVAL = 25000; // 스폰 주기 (ms)
+export const MAX_SAFE_ZONES = 1;               // 최대 개수
+export const SAFE_ZONE_CORNERS = [             // 4분면 모서리 좌표
+    { x: 150, y: 150 },
+    { x: 1770, y: 150 },
+    { x: 150, y: 930 },
+    { x: 1770, y: 930 },
+];
 
 // 히트박스 (캐릭터 중심 기준 오프셋)
 export const HIT_W = 30;
@@ -38,6 +47,15 @@ export const FRAME_MS = 120;
 // 공간 분할 그리드
 export const GRID_CELL_SIZE = 100;         // px, 공격 범위(~72px)보다 크게
 export const MAX_PLAYERS = 20;             // 방 최대 인원
+
+// 맵 장애물 (서버 충돌 + 클라이언트 렌더 공용)
+export const MAP_OBSTACLES = [
+    { id: 'north-ruin', x: 760, y: 155, w: 270, h: 72, label: 'ruin' },
+    { id: 'west-wall', x: 320, y: 355, w: 88, h: 260, label: 'wall' },
+    { id: 'center-stone', x: 830, y: 470, w: 260, h: 120, label: 'stone' },
+    { id: 'east-wall', x: 1495, y: 360, w: 90, h: 270, label: 'wall' },
+    { id: 'south-ruin', x: 850, y: 830, w: 300, h: 70, label: 'ruin' },
+];
 
 // 스프라이트 액션 코드
 export const ACTION_STAND = 'A00';
@@ -63,12 +81,55 @@ export const ITEM_PICKUP_RANGE  = 50;     // px
 
 export const SKILL_TYPES = ['explosion', 'shield', 'dash', 'heal'];
 
-// 아이템 레벨 확률 (누적)
-export const ITEM_PROB_LV1   = 0.55;
-export const ITEM_PROB_LV2   = 0.75;
-export const ITEM_PROB_LV3   = 0.84;
-// 0.84 ~ 1.00 = 저주 (16%)
-export const ITEM_PROB_LV4   = 0.0005; // Lv3 보유자만, 별도 체크
+// 아이템 외형 등급: 서버가 스폰 시 결정하고, 클라이언트는 표시 힌트로만 사용
+export const ITEM_GRADES = {
+    normal: {
+        label: '일반',
+        spawnWeight: 0.58,
+        lv1: 0.70,
+        lv2: 0.95,
+        lv3: 1.00,
+        curse: 0.06,
+        lv4: 0,
+    },
+    rare: {
+        label: '고급',
+        spawnWeight: 0.28,
+        lv1: 0.20,
+        lv2: 0.78,
+        lv3: 1.00,
+        curse: 0.14,
+        lv4: 0,
+    },
+    risky: {
+        label: '위험',
+        spawnWeight: 0.13,
+        lv1: 0.08,
+        lv2: 0.38,
+        lv3: 1.00,
+        curse: 0.32,
+        lv4: 0.001,
+    },
+    legendary: {
+        label: '전설 후보',
+        spawnWeight: 0.01,
+        lv1: 0.02,
+        lv2: 0.17,
+        lv3: 1.00,
+        curse: 0,
+        lv4: 0.03,
+    },
+};
+
+export const ITEM_DEFAULT_GRADE = 'normal';
+
+// 등급별 외형 색상 (클라이언트 렌더용)
+export const ITEM_GRADE_COLORS = {
+    normal:    { glow: '#ffe066', core: '#ffffff', symbol: '?' },
+    rare:      { glow: '#64b5f6', core: '#e3f2fd', symbol: '!' },
+    risky:     { glow: '#ba68c8', core: '#f3e5f5', symbol: '⚠' },
+    legendary: { glow: 'rainbow', core: '#ffffff', symbol: '★' },
+};
 
 // 레벨별 스킬 스탯 (인덱스 0=Lv1, 1=Lv2, 2=Lv3, 3=Lv4)
 export const SKILL_STATS = {

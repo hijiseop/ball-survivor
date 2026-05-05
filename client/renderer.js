@@ -1,7 +1,8 @@
 // client/renderer.js — Canvas 렌더링 (보간 + 카메라 + HUD + 미니맵)
 
-import * as KillFeed    from './hud-killfeed.js';
-import * as Leaderboard from './hud-leaderboard.js';
+import * as KillFeed    from './hud/killfeed.js';
+import * as Leaderboard from './hud/leaderboard.js';
+import * as PickupEffects from './effects/pickup-effects.js';
 import * as Input        from './input.js';
 
 import {
@@ -10,7 +11,9 @@ import {
     FRAME_MS, ACTION_STAND, ACTION_WALK, ACTION_ATTACKS,
     INVINCIBLE_MS, ATTACK_INTERVAL, ATTACK_RANGE,
     SKILL_STATS, ITEM_BLINK_MS, ACTION_SKILLS,
-    RESPAWN_DELAY_MS, GAME_RESTART_DELAY_MS,
+    RESPAWN_DELAY_MS, MAP_OBSTACLES,
+    ITEM_GRADE_COLORS, ITEM_DEFAULT_GRADE,
+    SAFE_ZONE_RADIUS,
 } from '/shared/constants.js';
 
 const DEBUG_HITBOX = false;
@@ -57,12 +60,6 @@ const effectTrigger  = new Map(); // playerId → lastAttackUntil
 const skillEffects   = [];        // { type, level, x, y, startTime }
 let legendaryUntil   = 0;
 let legendaryMsg     = '';
-let pickupFlashUntil = 0;
-let pickupFlashType  = '';        // 'upgrade' | 'curse' | 'legendary'
-
-// ── 게임 종료 ────────────────────────────────────────────────
-let _gameOverData    = null;      // { winnerId, winnerName, rankings, restartIn }
-let _gameOverAt      = 0;
 
 function spawnAttackEffects(playerId, cx, cy, innerColor, outerColor, now) {
     // 파티클 12개
@@ -182,33 +179,12 @@ export function notifySkillEffect({ playerId, skillType, level, x, y }) {
 }
 
 export function notifyItemPickup({ result }) {
-    if (!result) return;
-    const now = Date.now();
-    if (result.legendary) {
-        pickupFlashType  = 'legendary';
-        pickupFlashUntil = now + 1500;
-    } else if (result.curse) {
-        pickupFlashType  = 'curse';
-        pickupFlashUntil = now + 600;
-    } else if (!result.ignored) {
-        pickupFlashType  = 'upgrade';
-        pickupFlashUntil = now + 500;
-    }
+    PickupEffects.notify({ result }, VIEW_W, VIEW_H);
 }
 
 export function notifyLegendary(playerName, skillType) {
     legendaryUntil = Date.now() + 3000;
     legendaryMsg   = `✨ ${playerName} — 전설 ${skillType} Lv4 획득!`;
-}
-
-export function notifyGameOver(data) {
-    _gameOverData = data;
-    _gameOverAt = Date.now();
-}
-
-export function notifyGameRestart() {
-    _gameOverData = null;
-    _gameOverAt = 0;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -376,7 +352,7 @@ function interpPlayers(prevArr, currArr, t) {
 // ─────────────────────────────────────────────────────────────
 // 메인 렌더
 // ─────────────────────────────────────────────────────────────
-export function render(prevPlayers, currPlayers, t, myId, now, items = [], spectateTargetId = null) {
+export function render(prevPlayers, currPlayers, t, myId, now, items = [], safeZones = [], spectateTargetId = null) {
     if (!ctx) return;
 
     // 보간된 플레이어 목록
@@ -421,6 +397,11 @@ export function render(prevPlayers, currPlayers, t, myId, now, items = [], spect
         ctx.fillRect(0, 0, WORLD_W, WORLD_H);
     }
 
+    drawObstacles();
+
+    // 안전지대
+    drawSafeZones(safeZones, now);
+
     // 아이템
     drawItems(items, now);
 
@@ -453,20 +434,7 @@ export function render(prevPlayers, currPlayers, t, myId, now, items = [], spect
         ctx.fillRect(0, 0, VIEW_W, VIEW_H);
     }
 
-    // ── 픽업 플래시 ──────────────────────────────────────────
-    if (now < pickupFlashUntil) {
-        const t2 = 1 - (now - (pickupFlashUntil - (pickupFlashType === 'legendary' ? 1500 : pickupFlashType === 'curse' ? 600 : 500))) / (pickupFlashType === 'legendary' ? 1500 : pickupFlashType === 'curse' ? 600 : 500);
-        const alpha = 0.4 * Math.max(0, t2);
-        if (pickupFlashType === 'legendary') {
-            const hue = (now / 5) % 360;
-            ctx.fillStyle = `hsla(${hue},100%,60%,${alpha})`;
-        } else if (pickupFlashType === 'curse') {
-            ctx.fillStyle = `rgba(180,0,200,${alpha})`;
-        } else {
-            ctx.fillStyle = `rgba(255,220,0,${alpha})`;
-        }
-        ctx.fillRect(0, 0, VIEW_W, VIEW_H);
-    }
+    PickupEffects.draw(ctx, VIEW_W, VIEW_H, now);
 
     // ── 레전더리 메시지 ──────────────────────────────────────
     if (now < legendaryUntil) {
@@ -488,7 +456,7 @@ export function render(prevPlayers, currPlayers, t, myId, now, items = [], spect
     if (me) {
         const hudScale = Math.min(1, VIEW_W / 560);
         drawHUD(me, currPlayers, hudScale);
-        drawMinimap(players, me, hudScale);
+        drawMinimap(players, me, items, safeZones, hudScale);
         drawSkillHUD(me, now, hudScale);
         if (_showLeaderboard) Leaderboard.draw(ctx, currPlayers, myId, VIEW_W, hudScale);
 
@@ -503,11 +471,6 @@ export function render(prevPlayers, currPlayers, t, myId, now, items = [], spect
         }
     }
     KillFeed.draw(ctx, VIEW_W, VIEW_H);
-
-    // 게임 종료 화면 (최상위 레이어)
-    if (_gameOverData) {
-        drawGameOver(myId, now);
-    }
 
     const isMoving = (animState.get(myId)?.walkUntil ?? 0) > now;
     if (me && isMoving && !spectateTarget) drawTargetCursor();
@@ -818,7 +781,7 @@ function drawHUD(me, allPlayers, s) {
 // ─────────────────────────────────────────────────────────────
 // 미니맵
 // ─────────────────────────────────────────────────────────────
-function drawMinimap(players, me, s) {
+function drawMinimap(players, me, items, zones, s) {
     const MM_H   = Math.round(MM_W * WORLD_H / WORLD_W);
     const scaleX = MM_W / WORLD_W;
     const scaleY = MM_H / WORLD_H;
@@ -836,6 +799,44 @@ function drawMinimap(players, me, s) {
         ctx.globalAlpha = 0.55;
         ctx.drawImage(bgImg, MX, MY, MM_W, MM_H);
         ctx.globalAlpha = 1;
+    }
+
+    ctx.fillStyle = 'rgba(238, 205, 125, 0.78)';
+    ctx.strokeStyle = 'rgba(40, 28, 14, 0.85)';
+    ctx.lineWidth = 1;
+    for (const ob of MAP_OBSTACLES) {
+        const ox = MX + ob.x * scaleX;
+        const oy = MY + ob.y * scaleY;
+        const ow = Math.max(3, ob.w * scaleX);
+        const oh = Math.max(3, ob.h * scaleY);
+        ctx.fillRect(ox, oy, ow, oh);
+        ctx.strokeRect(ox, oy, ow, oh);
+    }
+
+    // 안전지대
+    for (const zone of zones) {
+        const zx = MX + zone.x * scaleX;
+        const zy = MY + zone.y * scaleY;
+        const zr = SAFE_ZONE_RADIUS * scaleX;
+        ctx.beginPath();
+        ctx.arc(zx, zy, zr, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(100, 255, 150, 0.3)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(100, 255, 150, 0.8)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+    }
+
+    for (const item of items) {
+        const ix = MX + item.x * scaleX;
+        const iy = MY + item.y * scaleY;
+        ctx.beginPath();
+        ctx.arc(ix, iy, 3.5, 0, Math.PI * 2);
+        ctx.fillStyle = '#80ffff';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
     }
 
     ctx.strokeStyle = 'rgba(255,255,255,0.55)';
@@ -870,37 +871,124 @@ function drawMinimap(players, me, s) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// 맵 장애물 (월드 공간)
+// ─────────────────────────────────────────────────────────────
+function drawObstacles() {
+    for (const ob of MAP_OBSTACLES) {
+        ctx.save();
+        ctx.fillStyle = ob.label === 'stone'
+            ? 'rgba(46, 55, 63, 0.88)'
+            : 'rgba(34, 41, 49, 0.84)';
+        ctx.strokeStyle = 'rgba(225, 232, 240, 0.22)';
+        ctx.lineWidth = 2;
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.35)';
+        ctx.beginPath();
+        ctx.roundRect(ob.x, ob.y, ob.w, ob.h, 8);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.stroke();
+
+        ctx.clip();
+        ctx.globalAlpha = 0.16;
+        ctx.fillStyle = '#ffffff';
+        const stripeW = 18;
+        for (let x = ob.x - ob.h; x < ob.x + ob.w; x += stripeW * 2) {
+            ctx.beginPath();
+            ctx.moveTo(x, ob.y + ob.h);
+            ctx.lineTo(x + ob.h, ob.y);
+            ctx.lineTo(x + ob.h + stripeW, ob.y);
+            ctx.lineTo(x + stripeW, ob.y + ob.h);
+            ctx.closePath();
+            ctx.fill();
+        }
+        ctx.restore();
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
+// 안전지대 (월드 공간)
+// ─────────────────────────────────────────────────────────────
+function drawSafeZones(zones, now) {
+    for (const zone of zones) {
+        const remaining = zone.expiresAt - now;
+        const isBlinking = remaining < 3000;
+        if (isBlinking && Math.floor(now / 250) % 2 === 0) continue;
+
+        const pulse = 0.85 + 0.15 * Math.sin(now / 400);
+        const r = SAFE_ZONE_RADIUS * pulse;
+
+        ctx.save();
+        // 외곽 링
+        ctx.strokeStyle = 'rgba(100, 255, 150, 0.7)';
+        ctx.lineWidth = 3;
+        ctx.setLineDash([8, 6]);
+        ctx.lineDashOffset = -now / 50;
+        ctx.beginPath();
+        ctx.arc(zone.x, zone.y, r, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // 내부 영역
+        const grad = ctx.createRadialGradient(zone.x, zone.y, 0, zone.x, zone.y, r);
+        grad.addColorStop(0, 'rgba(100, 255, 150, 0.15)');
+        grad.addColorStop(0.7, 'rgba(100, 255, 150, 0.08)');
+        grad.addColorStop(1, 'rgba(100, 255, 150, 0)');
+        ctx.fillStyle = grad;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.arc(zone.x, zone.y, r, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 아이콘
+        ctx.fillStyle = 'rgba(100, 255, 150, 0.9)';
+        ctx.font = 'bold 14px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('☮', zone.x, zone.y);
+        ctx.restore();
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
 // 아이템 (월드 공간)
 // ─────────────────────────────────────────────────────────────
 function drawItems(items, now) {
     for (const item of items) {
         const remaining = item.expiresAt - now;
         const isBlinking = remaining < ITEM_BLINK_MS;
-        if (isBlinking && Math.floor(now / 200) % 2 === 0) continue; // 깜빡임
+        if (isBlinking && Math.floor(now / 200) % 2 === 0) continue;
+
+        const grade = item.grade || ITEM_DEFAULT_GRADE;
+        const colors = ITEM_GRADE_COLORS[grade] || ITEM_GRADE_COLORS[ITEM_DEFAULT_GRADE];
+        const isLegendary = grade === 'legendary';
 
         const pulse = 0.7 + 0.3 * Math.sin(now / 300);
-        const r = 10 * pulse;
+        const r = isLegendary ? 14 * pulse : 10 * pulse;
+
+        // 무지개 색상 계산 (legendary)
+        const hue = (now / 10) % 360;
+        const glowColor = isLegendary ? `hsl(${hue}, 100%, 60%)` : colors.glow;
 
         ctx.save();
-        ctx.shadowBlur = 20 * pulse;
-        ctx.shadowColor = '#ffe066';
+        ctx.shadowBlur = isLegendary ? 30 * pulse : 20 * pulse;
+        ctx.shadowColor = glowColor;
         const grad = ctx.createRadialGradient(item.x, item.y, 0, item.x, item.y, r);
-        grad.addColorStop(0, '#ffffff');
-        grad.addColorStop(0.4, '#ffe066');
-        grad.addColorStop(1, 'rgba(255,200,0,0)');
+        grad.addColorStop(0, colors.core);
+        grad.addColorStop(0.4, glowColor);
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
         ctx.fillStyle = grad;
         ctx.beginPath();
         ctx.arc(item.x, item.y, r, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
 
-        // ? 텍스트
+        // 등급별 심볼
         ctx.save();
-        ctx.fillStyle = '#fff';
+        ctx.fillStyle = grade === 'risky' ? '#7b1fa2' : '#fff';
         ctx.font = `bold ${Math.round(10 * pulse)}px Arial`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('?', item.x, item.y);
+        ctx.fillText(colors.symbol, item.x, item.y);
         ctx.restore();
     }
 }
@@ -1210,109 +1298,6 @@ function drawRespawnCountdown(me, now) {
     ctx.shadowBlur = 0;
     ctx.fillStyle = '#ccc';
     ctx.fillText('부활까지...', VIEW_W / 2, VIEW_H / 2 + 30);
-
-    ctx.restore();
-}
-
-// ─────────────────────────────────────────────────────────────
-// 게임 종료 화면
-// ─────────────────────────────────────────────────────────────
-function drawGameOver(myId, now) {
-    if (!_gameOverData) return;
-
-    const elapsed = now - _gameOverAt;
-    const restartIn = Math.max(0, GAME_RESTART_DELAY_MS - elapsed);
-    const restartSec = (restartIn / 1000).toFixed(1);
-
-    ctx.save();
-
-    // 어두운 오버레이
-    ctx.fillStyle = 'rgba(0,0,0,0.75)';
-    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
-
-    const centerX = VIEW_W / 2;
-    const centerY = VIEW_H / 2;
-
-    // 승자 표시
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-
-    if (_gameOverData.winnerId) {
-        const isWinner = _gameOverData.winnerId === myId;
-        ctx.font = 'bold 36px Arial';
-        ctx.shadowBlur = 20;
-        ctx.shadowColor = isWinner ? '#ffd700' : '#fff';
-        ctx.fillStyle = isWinner ? '#ffd700' : '#fff';
-        ctx.fillText(isWinner ? '🏆 승리!' : '게임 종료', centerX, centerY - 120);
-
-        ctx.font = '20px Arial';
-        ctx.shadowBlur = 0;
-        ctx.fillStyle = '#aaa';
-        ctx.fillText(`우승: ${_gameOverData.winnerName}`, centerX, centerY - 80);
-    } else {
-        ctx.font = 'bold 36px Arial';
-        ctx.fillStyle = '#fff';
-        ctx.fillText('게임 종료', centerX, centerY - 100);
-    }
-
-    // 순위표
-    const rankings = _gameOverData.rankings || [];
-    const top5 = rankings.slice(0, 5);
-    const boxW = 300, boxH = 30 + top5.length * 28;
-    const boxX = centerX - boxW / 2;
-    const boxY = centerY - 40;
-
-    ctx.fillStyle = 'rgba(20,20,40,0.9)';
-    ctx.beginPath();
-    ctx.roundRect(boxX, boxY, boxW, boxH, 8);
-    ctx.fill();
-
-    ctx.strokeStyle = '#555';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-
-    // 헤더
-    ctx.font = 'bold 12px Arial';
-    ctx.fillStyle = '#888';
-    ctx.textAlign = 'left';
-    ctx.fillText('순위', boxX + 15, boxY + 18);
-    ctx.fillText('이름', boxX + 60, boxY + 18);
-    ctx.textAlign = 'right';
-    ctx.fillText('킬', boxX + 200, boxY + 18);
-    ctx.fillText('데스', boxX + 250, boxY + 18);
-
-    // 순위 목록
-    ctx.font = '13px Arial';
-    for (let i = 0; i < top5.length; i++) {
-        const p = top5[i];
-        const y = boxY + 42 + i * 28;
-        const isMe = p.id === myId;
-
-        if (isMe) {
-            ctx.fillStyle = 'rgba(79,195,247,0.2)';
-            ctx.fillRect(boxX + 5, y - 12, boxW - 10, 26);
-        }
-
-        ctx.textAlign = 'left';
-        ctx.fillStyle = p.rank === 1 ? '#ffd700' : p.rank === 2 ? '#c0c0c0' : p.rank === 3 ? '#cd7f32' : '#fff';
-        ctx.fillText(`${p.rank}`, boxX + 20, y);
-
-        ctx.fillStyle = isMe ? '#4fc3f7' : '#fff';
-        ctx.fillText(p.name.slice(0, 10), boxX + 60, y);
-
-        ctx.textAlign = 'right';
-        ctx.fillStyle = '#4caf50';
-        ctx.fillText(`${p.kills}`, boxX + 200, y);
-
-        ctx.fillStyle = '#f44336';
-        ctx.fillText(`${p.deaths}`, boxX + 250, y);
-    }
-
-    // 재시작 카운트다운
-    ctx.textAlign = 'center';
-    ctx.font = '16px Arial';
-    ctx.fillStyle = '#ffd54f';
-    ctx.fillText(`${restartSec}초 후 재시작...`, centerX, boxY + boxH + 30);
 
     ctx.restore();
 }

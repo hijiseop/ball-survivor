@@ -3,7 +3,7 @@
 import * as Network   from './network.js';
 import * as Input     from './input.js';
 import * as Renderer  from './renderer.js';
-import * as KillFeed  from './hud-killfeed.js';
+import * as KillFeed  from './hud/killfeed.js';
 import { ZOOM, SERVER_TICK_MS } from '/shared/constants.js';
 
 // ── 상태 ──────────────────────────────────────────────────────
@@ -12,10 +12,11 @@ let character  = null;
 let joined     = false;
 
 // 서버 상태 보간용 (이전 / 현재)
-let prevPlayers = [];
-let currPlayers = [];
-let currItems   = [];
-let stateTime   = 0;
+let prevPlayers   = [];
+let currPlayers   = [];
+let currItems     = [];
+let currSafeZones = [];
+let stateTime     = 0;
 
 // 관전 모드
 let spectateTargetId = null;  // null = 내 시점, string = 관전 대상
@@ -57,10 +58,11 @@ async function init() {
     });
 
     Network.on('state', state => {
-        prevPlayers = currPlayers;
-        currPlayers = state.players;
-        currItems   = state.items || [];
-        stateTime   = Date.now();
+        prevPlayers   = currPlayers;
+        currPlayers   = state.players;
+        currItems     = state.items || [];
+        currSafeZones = state.safeZones || [];
+        stateTime     = Date.now();
 
         // 관전 모드 자동 전환
         const me = currPlayers.find(p => p.id === myId);
@@ -113,16 +115,6 @@ async function init() {
         window.location.href = '/';
     });
 
-    Network.on('gameOver', (data) => {
-        Renderer.notifyGameOver(data);
-        spectateTargetId = null;
-    });
-
-    Network.on('gameRestart', () => {
-        Renderer.notifyGameRestart();
-        spectateTargetId = null;
-    });
-
     // 5. 입력 전송 루프 (~20Hz, 서버 틱과 동기화)
     setInterval(() => {
         if (!joined || myId === null) return;
@@ -140,7 +132,7 @@ function renderLoop() {
     const t = stateTime > 0 ? (now - stateTime) / SERVER_TICK_MS : 0;
 
     Input.update();
-    Renderer.render(prevPlayers, currPlayers, t, myId, now, currItems, spectateTargetId);
+    Renderer.render(prevPlayers, currPlayers, t, myId, now, currItems, currSafeZones, spectateTargetId);
 
     requestAnimationFrame(renderLoop);
 }

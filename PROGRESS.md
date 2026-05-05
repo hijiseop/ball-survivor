@@ -19,7 +19,10 @@
 - [x] 리스폰 시스템 (사망 후 3초 부활, 2초 무적)
 - [x] 모바일 스킬 버튼 UI (터치 영역 등록)
 - [x] 관전 모드 (사망 시 자동 전환, 좌우 키/터치로 대상 변경)
-- [x] 게임 종료 화면 (순위표 + 5초 후 자동 재시작)
+- [x] 맵 장애물 시스템 (서버 권위 충돌 + 렌더/미니맵 표시)
+- [x] 아이템 등급 시스템 (노란/파란/보라/무지개 + 확률표)
+- [x] 킬 드롭 (피해자 스킬 총합 기준 등급)
+- [x] 안전지대 (4분면 모서리, 공격 불가)
 
 ## ✅ 완료 항목
 
@@ -104,6 +107,43 @@
 - 생존 시간 / 최고 기록 표시, 클릭으로 재시작
 
 ## 📝 로그
+- 2026-05-05 : 아이템 등급 시스템 + 킬 드롭 + 안전지대
+  - shared/constants.js: ITEM_GRADES 확률표, ITEM_GRADE_COLORS 색상, 안전지대 상수 추가
+  - shared/item-system.js: rollItemGrade(), rollItemReward() 순수 함수 모듈 분리
+  - server/game-room.js: 등급 기반 아이템 스폰, 킬 시 드롭(_dropItemOnKill), 안전지대 로직
+  - client/renderer.js: 등급별 아이템 외형(노란?/파란!/보라⚠/무지개★), 안전지대 렌더링
+  - client/effects/pickup-effects.js: 가운데 폭죽 → 모서리 테두리 글로우 + 파티클로 변경
+- 2026-05-05 : 게임오버 제거 + 동일 아이템 소비 정책 변경
+  - server/game-room.js: _checkGameOver/_restartGame 제거 (상시 입장 맵)
+  - server/game-room.js: 동일/낮은 레벨 아이템도 조용히 소비 (상대 뺏기 전략)
+  - client/: gameOver/gameRestart 이벤트 및 렌더링 코드 제거
+  - client/effects/pickup-effects.js: noEffect 시 알림 없음
+- 2026-05-03 : 클라이언트 렌더링 추상화 및 폴더 구조 정리
+  - client/hud-killfeed.js → client/hud/killfeed.js 이동
+  - client/hud-leaderboard.js → client/hud/leaderboard.js 이동
+  - client/effects/pickup-effects.js 추가, 아이템 픽업 플래시/토스트/버스트 이펙트 분리
+  - client/renderer.js: 픽업 이펙트 책임 제거 후 PickupEffects 모듈 호출로 정리
+  - client/game.js, client/renderer.js: HUD import 경로 갱신
+  - README.md, SPEC.md: 클라이언트 폴더 구조 현행화
+- 2026-05-03 : 보상 레벨별 아이템 픽업 이펙트 추가
+  - client/renderer.js: pickupBursts 스크린 이펙트 레이어 추가
+  - client/renderer.js: Lv1~Lv3 보상은 레벨이 높을수록 링/파티클이 강해지도록 연출
+  - client/renderer.js: Lv4 전설 보상은 레인보우 광선 + JACKPOT 텍스트 + 대량 파티클 연출
+  - client/renderer.js: 저주는 보라/검은 파편과 균열 느낌의 부정적 연출로 분리
+  - README.md: 보상 레벨별 픽업 이펙트 기능 추가
+- 2026-05-03 : 아이템 저주/소비 정책 개선
+  - server/game-room.js: 빈 스킬 슬롯이 있으면 저주가 나오지 않고 Lv1~Lv3만 롤되도록 변경
+  - server/game-room.js: Lv4는 슬롯이 꽉 찬 Lv3 보유자에게만 선판정되는 전설 보상으로 유지
+  - server/game-room.js: 같은 타입 낮은/동일 레벨, 교체 불가 아이템은 소비하지 않고 맵에 남도록 변경
+  - client/renderer.js: 아이템 획득/저주/중복 미소비 결과 토스트 메시지 추가
+  - README.md, SPEC.md: 아이템/저주 정책 문서화
+- 2026-05-03 : 맵 장애물 시스템 구현
+  - shared/constants.js: MAP_OBSTACLES 추가 (서버 충돌 + 클라이언트 렌더 공용)
+  - shared/game-logic.js: isBlockedPosition(), randomOpenPosition(), 장애물 슬라이드 이동 처리 추가
+  - shared/game-logic.js: 대쉬가 장애물을 통과하지 않도록 세그먼트 기반 이동 처리
+  - server/player.js: 입장/리스폰 위치를 장애물과 겹치지 않는 위치로 선택
+  - server/game-room.js: 아이템 스폰 위치를 장애물과 겹치지 않는 위치로 선택
+  - client/renderer.js: 월드 장애물 및 미니맵 장애물 표시
 - 2026-05-03 : 모바일 스킬 버튼 + 관전 모드 구현
   - client/input.js: registerSkillAreas() — 터치 영역 등록, touchend에서 스킬 슬롯 감지
   - client/input.js: onSpectateInput() — 좌우 화살표/터치로 관전 대상 전환
@@ -211,13 +251,29 @@
 - 2026-04-15 : 캐릭터 머리 위 반투명 HP바 추가
 
 ## 🔜 다음 목표
-(현재 없음)
+
+### Phase 1: 캐릭터 정보 사이트
+- [ ] 랜딩 페이지 (캐릭터 검색 UI)
+- [ ] 캐릭터 프로필 페이지 (공개 조회, 로그인 불필요)
+- [ ] 스탯/장비/유니온 등 상세 정보 표시
+
+### Phase 2: 배틀 모드 분리
+- [ ] 배틀 섹션 분리 (`/battle`)
+- [ ] 방 목록/생성/참가 시스템
+- [ ] API 인증 후 본인 캐릭터로 게임 참가
+
+### 기타
+- [ ] 같은 캐릭터 중복 접속 방지 (탭 여러 개 차단)
 
 ## ✅ 이전 목표 (완료)
 - [x] 멀티탭 통합 테스트 (브라우저 2개 이상으로 실제 PvP 검증)
 - [x] 리스폰 시스템 (사망 후 3초 뒤 랜덤 위치 부활)
 - [x] 모바일 스킬 버튼 UI (터치 영역 등록 + 스킬 발동)
 - [x] 관전 모드 (사망 후 다른 플레이어 시점 전환)
-- [x] 게임 종료 화면 (최종 순위 + 스탯 요약)
 - [x] 리팩토링: levelModifier() 함수 적용
 - [x] 리팩토링: _emitHit/_emitKill 헬퍼 추출
+- [x] 맵 장애물 (서버 권위 충돌 + 렌더/미니맵 표시)
+- [x] 아이템 등급 시스템 (노란/파란/보라/무지개)
+- [x] 킬 드롭 (피해자 스킬 총합 기준)
+- [x] 안전지대 (4분면 모서리, 공격 불가)
+- [x] 게임오버 제거 (상시 입장 맵)

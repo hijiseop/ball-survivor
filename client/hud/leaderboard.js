@@ -1,4 +1,4 @@
-// client/hud-leaderboard.js — 킬 순위 리더보드 HUD (우측 상단)
+// client/hud/leaderboard.js — 킬 순위 리더보드 HUD (우측 상단)
 
 const PANEL_W = 160;
 const ROW_H   = 22;
